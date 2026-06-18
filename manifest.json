@@ -1,0 +1,30 @@
+{
+    "name": "coding_agent_webui",
+    "display_name": "Coding Agent WebUI",
+    "version": "0.3.1",
+    "description": "Coding Agent 浏览器端 WebUI，基于 React + Vite",
+    "author": "MoFox Team",
+    "dependencies": {
+        "plugins": ["coding_agent:>=0.2.4"],
+        "components": []
+    },
+    "categories": [
+        "tool"
+    ],
+    "tags": [
+        "coding",
+        "agent",
+        "webui",
+        "react",
+        "vite"
+    ],
+    "include": [
+        {
+            "component_type": "router",
+            "component_name": "coding_agent_webui",
+            "dependencies": []
+        }
+    ],
+    "entry_point": "plugin.py",
+    "min_core_version": "1.2.0-rc.1"
+}
