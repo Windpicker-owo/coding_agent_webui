@@ -108,6 +108,59 @@ class CodingAgentWebUIRouter(BaseRouter):
                 "desktop_mode": os.environ.get("MOFOX_CODE_DESKTOP") == "1",
             }
 
+        @self._own_app.get("/api/version")
+        async def version_info() -> dict[str, Any]:
+            """返回桌面端、框架和插件的版本信息。"""
+            import json
+
+            # 桌面端版本 — 从 Tauri 配置读取
+            desktop_version = "0.1.0"
+            tauri_conf = Path(__file__).parent.parent.parent / "desktop" / "tauri" / "tauri.conf.json"
+            try:
+                if tauri_conf.exists():
+                    with open(tauri_conf, "r", encoding="utf-8") as f:
+                        conf = json.load(f)
+                    desktop_version = conf.get("version", desktop_version)
+            except Exception:
+                pass
+
+            # Neo-MoFox 框架版本
+            framework_version = "unknown"
+            try:
+                from src.core.config import CORE_VERSION
+                framework_version = CORE_VERSION
+            except Exception:
+                pass
+
+            # coding_agent 插件版本 — 从 manifest.json
+            ca_version = "unknown"
+            ca_manifest = Path(__file__).parent.parent / "coding_agent" / "manifest.json"
+            try:
+                if ca_manifest.exists():
+                    with open(ca_manifest, "r", encoding="utf-8") as f:
+                        ca_data = json.load(f)
+                    ca_version = ca_data.get("version", ca_version)
+            except Exception:
+                pass
+
+            # coding_agent_webui 插件版本
+            webui_version = "unknown"
+            webui_manifest = Path(__file__).parent / "manifest.json"
+            try:
+                if webui_manifest.exists():
+                    with open(webui_manifest, "r", encoding="utf-8") as f:
+                        webui_data = json.load(f)
+                    webui_version = webui_data.get("version", webui_version)
+            except Exception:
+                pass
+
+            return {
+                "desktop": desktop_version,
+                "framework": framework_version,
+                "coding_agent": ca_version,
+                "coding_agent_webui": webui_version,
+            }
+
         @self._own_app.post("/api/setup/import")
         async def import_setup(request: Request):
             """从指定目录导入配置。"""
@@ -288,19 +341,15 @@ class CodingAgentWebUIRouter(BaseRouter):
             dist_dir.mkdir(parents=True, exist_ok=True)
             dest = dist_dir / "avatar-uploaded.png"
 
-            # 原子写入
+            # 原子写入：使用 with 语句确保 fd 总是被关闭
             tmp_fd, tmp_path = tempfile.mkstemp(
                 suffix=".png", dir=str(dist_dir)
             )
             try:
-                os.write(tmp_fd, raw_bytes)
-                os.close(tmp_fd)
+                with os.fdopen(tmp_fd, "wb") as f:
+                    f.write(raw_bytes)
                 os.replace(tmp_path, str(dest))
             except Exception:
-                try:
-                    os.close(tmp_fd)
-                except Exception:
-                    pass
                 try:
                     os.unlink(tmp_path)
                 except Exception:
@@ -351,9 +400,9 @@ class CodingAgentWebUIRouter(BaseRouter):
                 # SPA fallback：返回 index.html 让前端路由处理
                 index_path = dist_dir / "index.html"
                 if not index_path.exists():
-                    return FileResponse(
-                        str(index_path),
+                    return JSONResponse(
                         status_code=503,
+                        content={"detail": "Frontend not available"},
                     )
                 return FileResponse(index_path)
         else:
