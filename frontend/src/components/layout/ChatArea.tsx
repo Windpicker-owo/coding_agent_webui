@@ -78,7 +78,7 @@ function isNearBottom(el: HTMLElement): boolean {
 }
 
 export function ChatArea() {
-  const { messages, sessionId, isConnected, waitingForBot, connectionState, avatarUrl, ideMode } = useSession();
+  const { messages, sessionId, isConnected, waitingForBot, connectionState, avatarUrl, ideMode, lastWorkDir, projectName } = useSession();
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const autoScrollEnabledRef = useRef(true);
@@ -145,6 +145,35 @@ export function ChatArea() {
     );
   }
 
+  // 未打开项目：显示欢迎页，不显示聊天输入框
+  // projectName 只在后端返回 project.opened / session.ready 后才被设置，
+  // 因此它是“项目已打开”的权威信号。
+  if (!projectName) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center p-4 h-full bg-white dark:bg-gray-950">
+        <div className="text-center mb-8">
+          <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-200 mb-2">
+            {isConnected ? "欢迎使用 MoFox Code" : "等待连接..."}
+          </h2>
+          <p className="text-gray-500 dark:text-gray-400 text-sm mb-6">
+            {isConnected ? "请先打开一个项目目录开始工作。" : "请先启动后端服务。"}
+          </p>
+          {isConnected && (
+            <button
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent("open-project-dialog"));
+              }}
+              className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
+            >
+              打开项目
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // 项目已打开，但尚无活跃会话：显示输入框，发送后自动创建会话
   if (!sessionId) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-4 h-full bg-white dark:bg-gray-950">
@@ -153,7 +182,9 @@ export function ChatArea() {
             {isConnected ? "准备好开始编码了吗？" : "等待连接..."}
           </h2>
           <p className="text-gray-500 dark:text-gray-400 text-sm">
-            {isConnected ? "输入你的需求，MoFox将为你创建一个新会话。" : "请先启动后端服务并打开项目目录。"}
+            {isConnected
+              ? `项目: ${projectName}  —  输入你的需求，MoFox 将为你创建一个新会话。`
+              : "请先启动后端服务并打开项目目录。"}
           </p>
         </div>
         <div className={`w-full ${ideMode ? '' : 'max-w-3xl'} px-4`}>

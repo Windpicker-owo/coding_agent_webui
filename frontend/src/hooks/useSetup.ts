@@ -15,6 +15,12 @@ export interface ApiProviderConfig {
   base_url: string;
   api_key: string;
   client_type: "openai" | "anthropic" | "gemini" | "aiohttp_gemini" | "bedrock";
+  /** API 调用最大重试次数 */
+  max_retry?: number;
+  /** API 调用超时（秒） */
+  timeout?: number;
+  /** API 重试间隔（秒） */
+  retry_interval?: number;
 }
 
 export interface ModelAssignment {
@@ -56,8 +62,32 @@ export interface McpServerConfig {
   defer_loading?: boolean;
 }
 
+export interface CodingAgentSetupConfig {
+  /** 用户称呼 */
+  tui_username: string;
+  /** 首选终端 */
+  preferred_terminal: string;
+  /** 最大并行研究员数 */
+  max_parallel_researchers: number;
+  /** 项目理解缓存有效期（小时） */
+  cache_ttl_hours: number;
+}
+
+export interface ModelDetailConfig {
+  model_id: string;
+  api_provider: string;
+  max_context: number;
+  price_in: number;
+  price_out: number;
+  cache_hit_price_in: number | null;
+  force_stream_mode: boolean;
+  tool_call_compat: boolean;
+  extra_params: Record<string, unknown>;
+  anti_truncation: boolean;
+}
+
 export interface SetupState {
-  step: number; // 0=Provider, 1=Personality, 2=MCP, 3=Confirm
+  step: number; // 0=Provider, 1=Personality, 2=MCP, 3=Personalization, 4=Confirm
   apiProviders: ApiProviderConfig[];
   modelsAssignment: {
     main: ModelAssignment;
@@ -69,6 +99,8 @@ export interface SetupState {
   personality: PersonalityConfig;
   modelProfiles: ModelProfile[];
   mcpServers: McpServerConfig[];
+  codingAgent: CodingAgentSetupConfig;
+  models: ModelDetailConfig[];
 }
 
 export interface WizardSubmitConfig {
@@ -77,13 +109,16 @@ export interface WizardSubmitConfig {
     base_url: string;
     api_key: string;
     client_type: string;
+    max_retry?: number;
+    timeout?: number;
+    retry_interval?: number;
   }>;
-  models_assignment: {
-    main: { provider: string; model: string };
-    coder: { provider: string; model: string };
-    researcher: { provider: string; model: string };
-    reviewer: { provider: string; model: string };
-    title: { provider: string; model: string };
+  roles: {
+    main: string;
+    coder: string;
+    researcher: string;
+    reviewer: string;
+    title: string;
   };
   personality: {
     nickname: string;
@@ -111,6 +146,26 @@ export interface WizardSubmitConfig {
     url?: string;
     instructions?: string;
     defer_loading?: boolean;
+  }>;
+  coding_agent: {
+    tui_username: string;
+    preferred_terminal: string;
+    max_parallel_researchers: number;
+    cache_ttl_hours: number;
+    default_timeout: number;
+    max_output_lines: number;
+  };
+  models: Array<{
+    model_id: string;
+    api_provider: string;
+    max_context: number;
+    price_in: number;
+    price_out: number;
+    cache_hit_price_in: number | null;
+    force_stream_mode: boolean;
+    tool_call_compat: boolean;
+    extra_params: Record<string, unknown>;
+    anti_truncation: boolean;
   }>;
 }
 
@@ -161,6 +216,13 @@ const DEFAULT_SETUP: SetupState = {
     },
   ],
   mcpServers: [],
+  codingAgent: {
+    tui_username: "User",
+    preferred_terminal: "",
+    max_parallel_researchers: 6,
+    cache_ttl_hours: 24,
+  },
+  models: [],
 };
 
 // ─── localStorage 键 ─────────────────────────────────────────
@@ -222,7 +284,7 @@ export function useSetup() {
   }, []);
 
   const nextStep = useCallback(() => {
-    setState((prev) => ({ ...prev, step: Math.min(prev.step + 1, 3) }));
+    setState((prev) => ({ ...prev, step: Math.min(prev.step + 1, 4) }));
   }, []);
 
   const prevStep = useCallback(() => {
@@ -311,6 +373,16 @@ export function useSetup() {
     []
   );
 
+  const updateCodingAgent = useCallback(
+    (partial: Partial<CodingAgentSetupConfig>) => {
+      setState((prev) => ({
+        ...prev,
+        codingAgent: { ...prev.codingAgent, ...partial },
+      }));
+    },
+    []
+  );
+
   /** 获取 provider 的名字辅助函数 */
   const getProviderName = useCallback(
     (providerId: string): string => {
@@ -325,27 +397,30 @@ export function useSetup() {
     const defaultProviderName = state.apiProviders[0]?.name.trim() || "OpenAI";
     
     // Helper to get resolved assignment
-    const getResolvedAssignment = (role: keyof SetupState["modelsAssignment"]) => {
-        const assignment = state.modelsAssignment[role];
-        const providerName = getProviderName(assignment.providerId) || defaultProviderName;
-        // 如果没有模型名，退回到 main 模型名
-        const modelName = assignment.modelName.trim() || state.modelsAssignment.main.modelName.trim();
-        return { provider: providerName, model: modelName };
+    const getResolvedRoleStr = (role: keyof SetupState["modelsAssignment"]) => {
+      const assignment = state.modelsAssignment[role];
+      const providerName = getProviderName(assignment.providerId) || defaultProviderName;
+      // 如果没有模型名，退回到 main 模型。
+      const modelName = assignment.modelName.trim() || state.modelsAssignment.main.modelName.trim();
+      return `${providerName}/${modelName}`;
     };
 
-    return {
+    const payload = {
       api_providers: state.apiProviders.map((p) => ({
         name: p.name.trim(),
         base_url: p.base_url.trim(),
         api_key: p.api_key.trim(),
         client_type: p.client_type,
+        max_retry: p.max_retry ?? 2,
+        timeout: p.timeout ?? 30,
+        retry_interval: p.retry_interval ?? 10,
       })),
-      models_assignment: {
-        main: getResolvedAssignment("main"),
-        coder: getResolvedAssignment("coder"),
-        researcher: getResolvedAssignment("researcher"),
-        reviewer: getResolvedAssignment("reviewer"),
-        title: getResolvedAssignment("title"),
+      roles: {
+        main: getResolvedRoleStr("main"),
+        coder: getResolvedRoleStr("coder"),
+        researcher: getResolvedRoleStr("researcher"),
+        reviewer: getResolvedRoleStr("reviewer"),
+        title: getResolvedRoleStr("title"),
       },
       personality: {
         nickname: state.personality.nickname.trim() || "小狐狸",
@@ -374,7 +449,28 @@ export function useSetup() {
         instructions: srv.instructions?.trim(),
         defer_loading: srv.defer_loading,
       })),
+      coding_agent: {
+        tui_username: state.codingAgent.tui_username.trim() || "User",
+        preferred_terminal: state.codingAgent.preferred_terminal || "",
+        max_parallel_researchers: state.codingAgent.max_parallel_researchers || 6,
+        cache_ttl_hours: state.codingAgent.cache_ttl_hours || 24,
+        default_timeout: 30,
+        max_output_lines: 200,
+      },
+      models: state.models.map((m) => ({
+        model_id: m.model_id,
+        api_provider: m.api_provider,
+        max_context: m.max_context,
+        price_in: m.price_in,
+        price_out: m.price_out,
+        cache_hit_price_in: m.cache_hit_price_in,
+        force_stream_mode: m.force_stream_mode,
+        tool_call_compat: m.tool_call_compat,
+        extra_params: m.extra_params,
+        anti_truncation: m.anti_truncation,
+      })),
     };
+    return payload;
   }, [state, getProviderName]);
 
   const addMcpServer = useCallback(() => {
@@ -435,25 +531,31 @@ export function useSetup() {
             base_url: p.base_url,
             api_key: p.api_key,
             client_type: p.client_type,
+            max_retry: p.max_retry ?? 2,
+            timeout: p.timeout ?? 30,
+            retry_interval: p.retry_interval ?? 10,
           }));
         }
 
-        if (data.models_assignment && newState.apiProviders.length > 0) {
-          const resolveAssignment = (roleData: any) => {
-            if (!roleData) return undefined;
-            const provider = newState.apiProviders.find(p => p.name === roleData.provider) || newState.apiProviders[0];
-            return {
-              providerId: provider.id,
-              modelName: roleData.model,
-            };
+        if (data.roles) {
+          const resolveAssignment = (roleStr: any) => {
+            if (!roleStr || typeof roleStr !== "string") return undefined;
+            const parts = roleStr.split("/");
+            if (parts.length >= 2) {
+              const providerName = parts[0];
+              const modelName = parts.slice(1).join("/");
+              const provider = newState.apiProviders.find(p => p.name === providerName) || newState.apiProviders[0];
+              return { providerId: provider?.id || "", modelName };
+            }
+            return { providerId: newState.apiProviders[0]?.id || "", modelName: roleStr };
           };
 
           newState.modelsAssignment = {
-            main: resolveAssignment(data.models_assignment.main) || prev.modelsAssignment.main,
-            coder: resolveAssignment(data.models_assignment.coder) || prev.modelsAssignment.coder,
-            researcher: resolveAssignment(data.models_assignment.researcher) || prev.modelsAssignment.researcher,
-            reviewer: resolveAssignment(data.models_assignment.reviewer) || prev.modelsAssignment.reviewer,
-            title: resolveAssignment(data.models_assignment.title) || prev.modelsAssignment.title,
+            main: resolveAssignment(data.roles.main) || prev.modelsAssignment.main,
+            coder: resolveAssignment(data.roles.coder) || prev.modelsAssignment.coder,
+            researcher: resolveAssignment(data.roles.researcher) || prev.modelsAssignment.researcher,
+            reviewer: resolveAssignment(data.roles.reviewer) || prev.modelsAssignment.reviewer,
+            title: resolveAssignment(data.roles.title) || prev.modelsAssignment.title,
           };
         }
 
@@ -470,6 +572,30 @@ export function useSetup() {
 
         if (data.model_profiles && data.model_profiles.length > 0) {
           newState.modelProfiles = data.model_profiles;
+        }
+
+        if (data.coding_agent) {
+          newState.codingAgent = {
+            tui_username: data.coding_agent.tui_username || "User",
+            preferred_terminal: data.coding_agent.preferred_terminal || "",
+            max_parallel_researchers: data.coding_agent.max_parallel_researchers ?? 6,
+            cache_ttl_hours: data.coding_agent.cache_ttl_hours ?? 24,
+          };
+        }
+
+        if (data.models && Array.isArray(data.models)) {
+          newState.models = data.models.map((m: any) => ({
+            model_id: m.model_id || "",
+            api_provider: m.api_provider || "",
+            max_context: m.max_context ?? 0,
+            price_in: m.price_in ?? 0,
+            price_out: m.price_out ?? 0,
+            cache_hit_price_in: m.cache_hit_price_in ?? null,
+            force_stream_mode: m.force_stream_mode ?? false,
+            tool_call_compat: m.tool_call_compat ?? false,
+            extra_params: m.extra_params ?? {},
+            anti_truncation: m.anti_truncation ?? false,
+          }));
         }
 
         return newState;
@@ -550,6 +676,7 @@ export function useSetup() {
     removeApiProvider,
     updateModelAssignment,
     updatePersonality,
+    updateCodingAgent,
     addMcpServer,
     updateMcpServer,
     removeMcpServer,

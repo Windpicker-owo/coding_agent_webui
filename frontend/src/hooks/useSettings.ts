@@ -13,6 +13,8 @@ import type {
   SetupState,
   ModelAssignment,
   McpServerConfig,
+  CodingAgentSetupConfig,
+  ModelDetailConfig,
 } from "./useSetup.ts";
 
 // ─── 类型定义 ────────────────────────────────────────────────
@@ -27,6 +29,8 @@ export interface SettingsState {
   personality: PersonalityConfig;
   modelProfiles: ModelProfile[];
   mcpServers: McpServerConfig[];
+  codingAgent: CodingAgentSetupConfig;
+  models: ModelDetailConfig[];
   notConfigured: boolean;
 }
 
@@ -66,6 +70,13 @@ const DEFAULT_SETTINGS: SettingsState = {
   },
   modelProfiles: [],
   mcpServers: [],
+  codingAgent: {
+    tui_username: "User",
+    preferred_terminal: "",
+    max_parallel_researchers: 6,
+    cache_ttl_hours: 24,
+  },
+  models: [],
   notConfigured: false,
 };
 
@@ -126,19 +137,26 @@ export function useSettings() {
           apiProviders = [DEFAULT_SETTINGS.apiProviders[0]];
       }
 
-      if (data.models_assignment) {
-          const findProviderId = (name: string) => {
-              const p = apiProviders.find(p => p.name === name);
-              return p ? p.id : apiProviders[0].id;
+      if (data.roles) {
+          const parseRole = (roleStr: string | undefined | null) => {
+              if (!roleStr) return { providerId: apiProviders[0]?.id || "", modelName: "" };
+              const parts = roleStr.split("/");
+              if (parts.length >= 2) {
+                  const providerName = parts[0];
+                  const modelName = parts.slice(1).join("/");
+                  const p = apiProviders.find(p => p.name === providerName);
+                  return { providerId: p ? p.id : (apiProviders[0]?.id || ""), modelName };
+              }
+              return { providerId: apiProviders[0]?.id || "", modelName: roleStr };
           };
           modelsAssignment = {
-              main: { providerId: findProviderId(data.models_assignment.main?.provider), modelName: data.models_assignment.main?.model || "" },
-              coder: { providerId: findProviderId(data.models_assignment.coder?.provider), modelName: data.models_assignment.coder?.model || "" },
-              researcher: { providerId: findProviderId(data.models_assignment.researcher?.provider), modelName: data.models_assignment.researcher?.model || "" },
-              reviewer: { providerId: findProviderId(data.models_assignment.reviewer?.provider), modelName: data.models_assignment.reviewer?.model || "" },
-              title: { providerId: findProviderId(data.models_assignment.title?.provider), modelName: data.models_assignment.title?.model || "" },
+              main: parseRole(data.roles.main),
+              coder: parseRole(data.roles.coder),
+              researcher: parseRole(data.roles.researcher),
+              reviewer: parseRole(data.roles.reviewer),
+              title: parseRole(data.roles.title),
           };
-      } else if (data.models) {
+      } else if (data.models && !Array.isArray(data.models)) {
           const pid = apiProviders[0].id;
           modelsAssignment = {
               main: { providerId: pid, modelName: data.models.main || "" },
@@ -184,6 +202,28 @@ export function useSettings() {
         defer_loading: !!srv.defer_loading,
       }));
 
+      const codingAgent: CodingAgentSetupConfig = {
+        tui_username: data.coding_agent?.tui_username || "User",
+        preferred_terminal: data.coding_agent?.preferred_terminal || "",
+        max_parallel_researchers: data.coding_agent?.max_parallel_researchers ?? 6,
+        cache_ttl_hours: data.coding_agent?.cache_ttl_hours ?? 24,
+      };
+
+      const models: ModelDetailConfig[] = (
+        data.models || []
+      ).map((m: Record<string, any>) => ({
+        model_id: m.model_id || "",
+        api_provider: m.api_provider || "",
+        max_context: m.max_context ?? 0,
+        price_in: m.price_in ?? 0,
+        price_out: m.price_out ?? 0,
+        cache_hit_price_in: m.cache_hit_price_in ?? null,
+        force_stream_mode: m.force_stream_mode ?? false,
+        tool_call_compat: m.tool_call_compat ?? false,
+        extra_params: m.extra_params ?? {},
+        anti_truncation: m.anti_truncation ?? false,
+      }));
+
       setState((prev) => ({
         ...prev,
         loading: false,
@@ -193,6 +233,8 @@ export function useSettings() {
         personality,
         modelProfiles,
         mcpServers,
+        codingAgent,
+        models,
       }));
     } catch (e) {
       setState((prev) => ({
@@ -219,11 +261,11 @@ export function useSettings() {
     setState((prev) => ({ ...prev, saving: true, error: "" }));
 
     const defaultProviderName = state.apiProviders[0]?.name.trim() || "OpenAI";
-    const getResolvedAssignment = (role: keyof SetupState["modelsAssignment"]) => {
+    const getResolvedRoleStr = (role: keyof SetupState["modelsAssignment"]) => {
         const assignment = state.modelsAssignment[role];
         const providerName = getProviderName(assignment.providerId) || defaultProviderName;
         const modelName = assignment.modelName.trim() || state.modelsAssignment.main.modelName.trim();
-        return { provider: providerName, model: modelName };
+        return `${providerName}/${modelName}`;
     };
 
     const submitBody = {
@@ -232,13 +274,16 @@ export function useSettings() {
         base_url: p.base_url.trim(),
         api_key: p.api_key.trim(),
         client_type: p.client_type,
+        max_retry: p.max_retry ?? 2,
+        timeout: p.timeout ?? 30,
+        retry_interval: p.retry_interval ?? 10,
       })),
-      models_assignment: {
-        main: getResolvedAssignment("main"),
-        coder: getResolvedAssignment("coder"),
-        researcher: getResolvedAssignment("researcher"),
-        reviewer: getResolvedAssignment("reviewer"),
-        title: getResolvedAssignment("title"),
+      roles: {
+        main: getResolvedRoleStr("main"),
+        coder: getResolvedRoleStr("coder"),
+        researcher: getResolvedRoleStr("researcher"),
+        reviewer: getResolvedRoleStr("reviewer"),
+        title: getResolvedRoleStr("title"),
       },
       personality: {
         nickname: state.personality.nickname.trim() || "小狐狸",
@@ -266,6 +311,26 @@ export function useSettings() {
         url: srv.url?.trim(),
         instructions: srv.instructions?.trim(),
         defer_loading: srv.defer_loading,
+      })),
+      coding_agent: {
+        tui_username: state.codingAgent.tui_username.trim() || "User",
+        preferred_terminal: state.codingAgent.preferred_terminal || "",
+        max_parallel_researchers: state.codingAgent.max_parallel_researchers || 6,
+        cache_ttl_hours: state.codingAgent.cache_ttl_hours || 24,
+        default_timeout: 30,
+        max_output_lines: 200,
+      },
+      models: state.models.map((m) => ({
+        model_id: m.model_id,
+        api_provider: m.api_provider,
+        max_context: m.max_context,
+        price_in: m.price_in,
+        price_out: m.price_out,
+        cache_hit_price_in: m.cache_hit_price_in,
+        force_stream_mode: m.force_stream_mode,
+        tool_call_compat: m.tool_call_compat,
+        extra_params: m.extra_params,
+        anti_truncation: m.anti_truncation,
       })),
     };
 
@@ -431,6 +496,104 @@ export function useSettings() {
     }));
   }, []);
 
+  const updateCodingAgent = useCallback(
+    (partial: Partial<CodingAgentSetupConfig>) => {
+      setState((prev) => ({
+        ...prev,
+        codingAgent: { ...prev.codingAgent, ...partial },
+      }));
+    },
+    []
+  );
+
+  const updateModel = useCallback(
+    (index: number, partial: Partial<ModelDetailConfig>) => {
+      setState((prev) => ({
+        ...prev,
+        models: prev.models.map((m, i) =>
+          i === index ? { ...m, ...partial } : m
+        ),
+      }));
+    },
+    []
+  );
+
+  const addModel = useCallback(() => {
+    setState((prev) => ({
+      ...prev,
+      models: [
+        ...prev.models,
+        {
+          model_id: "",
+          api_provider: prev.apiProviders[0]?.name || "",
+          max_context: 0,
+          price_in: 0,
+          price_out: 0,
+          cache_hit_price_in: null,
+          force_stream_mode: false,
+          tool_call_compat: false,
+          extra_params: {},
+          anti_truncation: false,
+        },
+      ],
+    }));
+  }, []);
+
+  const removeModel = useCallback((index: number) => {
+    setState((prev) => ({
+      ...prev,
+      models: prev.models.filter((_, i) => i !== index),
+    }));
+  }, []);
+
+  const addModelProfile = useCallback(() => {
+    setState((prev) => ({
+      ...prev,
+      modelProfiles: [
+        ...prev.modelProfiles,
+        {
+          profile_name: "New Profile",
+          model_name: prev.modelsAssignment.main.modelName || "gpt-4o",
+          tags: [],
+          description: "",
+          temperature: 0.5,
+          max_tokens: 16384,
+        },
+      ],
+    }));
+  }, []);
+
+  const updateModelProfile = useCallback(
+    (index: number, partial: Partial<ModelProfile>) => {
+      setState((prev) => ({
+        ...prev,
+        modelProfiles: prev.modelProfiles.map((mp, i) =>
+          i === index ? { ...mp, ...partial } : mp
+        ),
+      }));
+    },
+    []
+  );
+
+  const removeModelProfile = useCallback((index: number) => {
+    setState((prev) => ({
+      ...prev,
+      modelProfiles: prev.modelProfiles.filter((_, i) => i !== index),
+    }));
+  }, []);
+
+  const updateApiProviderAdvanced = useCallback(
+    (id: string, partial: { max_retry?: number; timeout?: number; retry_interval?: number }) => {
+      setState((prev) => ({
+        ...prev,
+        apiProviders: prev.apiProviders.map((p) =>
+          p.id === id ? { ...p, ...partial } : p
+        ),
+      }));
+    },
+    []
+  );
+
   return {
     state,
     loadSettings,
@@ -443,5 +606,13 @@ export function useSettings() {
     addMcpServer,
     updateMcpServer,
     removeMcpServer,
+    updateCodingAgent,
+    updateModel,
+    addModel,
+    removeModel,
+    addModelProfile,
+    updateModelProfile,
+    removeModelProfile,
+    updateApiProviderAdvanced,
   };
 }

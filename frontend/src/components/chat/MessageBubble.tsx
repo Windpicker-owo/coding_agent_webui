@@ -993,6 +993,13 @@ export function MessageBubble({ msg }: MessageBubbleProps) {
         >
           {isUser || isSystem ? (
             <div className={`${ideMode ? 'text-[13px]' : 'text-[15px]'} whitespace-pre-wrap break-words leading-relaxed`}>
+              {isUser && Array.isArray(msg.metadata?.images) && (msg.metadata!.images as string[]).length > 0 && (
+                <div className="flex gap-2 flex-wrap mb-2">
+                  {(msg.metadata!.images as string[]).map((src, i) => (
+                    <img key={i} src={src} alt="" className="max-w-[200px] max-h-[200px] rounded-lg object-cover border border-white/20" />
+                  ))}
+                </div>
+              )}
               {msg.content}
             </div>
           ) : (

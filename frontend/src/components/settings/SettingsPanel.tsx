@@ -6,7 +6,7 @@
  */
 
 import { useState, useEffect, useCallback } from "react";
-import { X, Save, Loader2, AlertCircle } from "lucide-react";
+import { X, Save, Loader2, AlertCircle, Plus, Trash2 } from "lucide-react";
 import { useSession } from "../../hooks/useSession.ts";
 import { useSettings, isMaskedKey } from "../../hooks/useSettings.ts";
 import { StepProvider } from "../setup/StepProvider.tsx";
@@ -17,7 +17,7 @@ interface SettingsPanelProps {
   onClose: () => void;
 }
 
-type CollapseSection = "provider" | "models" | "personality" | "mcp";
+type CollapseSection = "provider" | "models" | "personality" | "mcp" | "advancedApi" | "modelDetails" | "coderProfiles" | "builtinPlugin";
 
 export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const sessionState = useSession();
@@ -33,6 +33,14 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     addMcpServer,
     updateMcpServer,
     removeMcpServer,
+    updateCodingAgent,
+    updateModel,
+    addModel,
+    removeModel,
+    addModelProfile,
+    updateModelProfile,
+    removeModelProfile,
+    updateApiProviderAdvanced,
   } = useSettings();
 
   const [expanded, setExpanded] = useState<Set<CollapseSection>>(
@@ -228,6 +236,352 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                   personality={state.personality}
                   onUpdate={updatePersonality}
                 />
+              </div>
+            )}
+          </div>
+
+          {/* ── 4. 高级 API 设置 ── */}
+          <div className={sectionClass}>
+            <button
+              onClick={() => toggleSection("advancedApi")}
+              className={sectionHeaderClass}
+            >
+              <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">
+                高级 API 设置
+              </span>
+              <span className="text-xs text-gray-400">
+                {expanded.has("advancedApi") ? "收起 ▲" : "展开 ▼"}
+              </span>
+            </button>
+            {expanded.has("advancedApi") && (
+              <div className={sectionContentClass + " space-y-4"}>
+                {state.apiProviders.map((provider) => (
+                  <div key={provider.id} className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                    <h4 className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-2">
+                      {provider.name || "未命名提供商"}
+                    </h4>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div>
+                        <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1 block">
+                          最大重试
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={10}
+                          value={provider.max_retry ?? 2}
+                          onChange={(e) =>
+                            updateApiProviderAdvanced(provider.id, {
+                              max_retry: parseInt(e.target.value) || 0,
+                            })
+                          }
+                          className="w-full px-3 py-1.5 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-xs text-gray-900 dark:text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1 block">
+                          超时（秒）
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={600}
+                          value={provider.timeout ?? 30}
+                          onChange={(e) =>
+                            updateApiProviderAdvanced(provider.id, {
+                              timeout: parseInt(e.target.value) || 30,
+                            })
+                          }
+                          className="w-full px-3 py-1.5 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-xs text-gray-900 dark:text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1 block">
+                          重试间隔（秒）
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={120}
+                          value={provider.retry_interval ?? 10}
+                          onChange={(e) =>
+                            updateApiProviderAdvanced(provider.id, {
+                              retry_interval: parseInt(e.target.value) || 0,
+                            })
+                          }
+                          className="w-full px-3 py-1.5 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-xs text-gray-900 dark:text-white"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* ── 5. 模型详情 ── */}
+          <div className={sectionClass}>
+            <button
+              onClick={() => toggleSection("modelDetails")}
+              className={sectionHeaderClass}
+            >
+              <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">
+                模型详情
+              </span>
+              <span className="text-xs text-gray-400">
+                {expanded.has("modelDetails") ? "收起 ▲" : "展开 ▼"}
+              </span>
+            </button>
+            {expanded.has("modelDetails") && (
+              <div className={sectionContentClass}>
+                <StepProvider
+                  apiProviders={state.apiProviders}
+                  modelsAssignment={state.modelsAssignment}
+                  onAddProvider={addApiProvider}
+                  onUpdateProvider={updateApiProvider}
+                  onRemoveProvider={removeApiProvider}
+                  onUpdateModelAssignment={updateModelAssignment}
+                  models={state.models}
+                  onUpdateModel={updateModel}
+                  onAddModel={addModel}
+                  onRemoveModel={removeModel}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* ── 6. Coder Profile ── */}
+          <div className={sectionClass}>
+            <button
+              onClick={() => toggleSection("coderProfiles")}
+              className={sectionHeaderClass}
+            >
+              <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">
+                Coder Profile
+              </span>
+              <span className="text-xs text-gray-400">
+                {expanded.has("coderProfiles") ? "收起 ▲" : "展开 ▼"}
+              </span>
+            </button>
+            {expanded.has("coderProfiles") && (
+              <div className={sectionContentClass + " space-y-4"}>
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-gray-500">
+                    配置不同的 Coder 模型配置文件（温度、tokens、描述等）。
+                  </p>
+                  <button
+                    onClick={addModelProfile}
+                    className="flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 bg-blue-50 dark:bg-blue-900/30 px-2 py-1 rounded-lg transition-colors"
+                  >
+                    <Plus size={12} />
+                    添加 Profile
+                  </button>
+                </div>
+                {state.modelProfiles.length === 0 ? (
+                  <div className="text-xs text-gray-400 dark:text-gray-600 text-center py-4">
+                    暂无 Coder Profile
+                  </div>
+                ) : (
+                  state.modelProfiles.map((mp, i) => (
+                    <div
+                      key={i}
+                      className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg space-y-2"
+                    >
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-sm font-bold text-gray-700 dark:text-gray-300">
+                          {mp.profile_name || "未命名 Profile"}
+                        </h4>
+                        <button
+                          onClick={() => removeModelProfile(i)}
+                          className="text-gray-400 hover:text-red-500 transition-colors p-0.5"
+                          title="删除"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-xs text-gray-500 dark:text-gray-400 block">
+                            Profile 名称
+                          </label>
+                          <input
+                            type="text"
+                            value={mp.profile_name}
+                            onChange={(e) =>
+                              updateModelProfile(i, { profile_name: e.target.value })
+                            }
+                            className="w-full px-2 py-1 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded text-xs text-gray-900 dark:text-white mt-0.5"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-gray-500 dark:text-gray-400 block">
+                            模型名称
+                          </label>
+                          <input
+                            type="text"
+                            value={mp.model_name}
+                            onChange={(e) =>
+                              updateModelProfile(i, { model_name: e.target.value })
+                            }
+                            className="w-full px-2 py-1 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded text-xs text-gray-900 dark:text-white mt-0.5"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-gray-500 dark:text-gray-400 block">
+                            温度
+                          </label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            min={0}
+                            max={2}
+                            value={mp.temperature}
+                            onChange={(e) =>
+                              updateModelProfile(i, {
+                                temperature: parseFloat(e.target.value) ?? 0.5,
+                              })
+                            }
+                            className="w-full px-2 py-1 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded text-xs text-gray-900 dark:text-white mt-0.5"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-gray-500 dark:text-gray-400 block">
+                            最大 Tokens
+                          </label>
+                          <input
+                            type="number"
+                            value={mp.max_tokens}
+                            onChange={(e) =>
+                              updateModelProfile(i, {
+                                max_tokens: parseInt(e.target.value) || 16384,
+                              })
+                            }
+                            className="w-full px-2 py-1 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded text-xs text-gray-900 dark:text-white mt-0.5"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-xs text-gray-500 dark:text-gray-400 block">
+                          描述
+                        </label>
+                        <input
+                          type="text"
+                          value={mp.description}
+                          onChange={(e) =>
+                            updateModelProfile(i, { description: e.target.value })
+                          }
+                          className="w-full px-2 py-1 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded text-xs text-gray-900 dark:text-white mt-0.5"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-gray-500 dark:text-gray-400 block">
+                          Tags（逗号分隔）
+                        </label>
+                        <input
+                          type="text"
+                          value={mp.tags.join(", ")}
+                          onChange={(e) =>
+                            updateModelProfile(i, {
+                              tags: e.target.value
+                                .split(",")
+                                .map((t) => t.trim())
+                                .filter(Boolean),
+                            })
+                          }
+                          className="w-full px-2 py-1 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded text-xs text-gray-900 dark:text-white mt-0.5"
+                        />
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* ── 7. 内置插件设置 ── */}
+          <div className={sectionClass}>
+            <button
+              onClick={() => toggleSection("builtinPlugin")}
+              className={sectionHeaderClass}
+            >
+              <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">
+                内置插件设置
+              </span>
+              <span className="text-xs text-gray-400">
+                {expanded.has("builtinPlugin") ? "收起 ▲" : "展开 ▼"}
+              </span>
+            </button>
+            {expanded.has("builtinPlugin") && (
+              <div className={sectionContentClass + " space-y-4"}>
+                <div>
+                  <h4 className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-3">
+                    Coding Agent 设置
+                  </h4>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1 block">
+                        用户称呼
+                      </label>
+                      <input
+                        type="text"
+                        value={state.codingAgent.tui_username}
+                        onChange={(e) => updateCodingAgent({ tui_username: e.target.value })}
+                        placeholder="User"
+                        className="w-full px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs text-gray-900 dark:text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1 block">
+                        首选终端
+                      </label>
+                      <select
+                        value={state.codingAgent.preferred_terminal}
+                        onChange={(e) => updateCodingAgent({ preferred_terminal: e.target.value })}
+                        className="w-full px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs text-gray-900 dark:text-white"
+                      >
+                        <option value="">自动检测</option>
+                        <option value="powershell">PowerShell 5</option>
+                        <option value="pwsh">PowerShell 7</option>
+                        <option value="cmd">CMD</option>
+                        <option value="bash">Bash</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1 block">
+                        最大并行研究员数
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={20}
+                        value={state.codingAgent.max_parallel_researchers}
+                        onChange={(e) =>
+                          updateCodingAgent({
+                            max_parallel_researchers: parseInt(e.target.value) || 1,
+                          })
+                        }
+                        className="w-full px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs text-gray-900 dark:text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1 block">
+                        缓存有效期（小时）
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={720}
+                        value={state.codingAgent.cache_ttl_hours}
+                        onChange={(e) =>
+                          updateCodingAgent({
+                            cache_ttl_hours: parseInt(e.target.value) || 1,
+                          })
+                        }
+                        className="w-full px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs text-gray-900 dark:text-white"
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
           </div>

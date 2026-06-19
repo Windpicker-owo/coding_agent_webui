@@ -375,7 +375,9 @@ class CodingAgentWebUIRouter(BaseRouter):
         if dist_dir.exists() and any(dist_dir.iterdir()):
             @self._own_app.get("/")
             async def root() -> FileResponse:
-                return FileResponse(dist_dir / "index.html")
+                resp = FileResponse(dist_dir / "index.html")
+                resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+                return resp
 
             @self._own_app.get("/{full_path:path}", response_model=None)
             async def spa_fallback(full_path: str = "") -> FileResponse | JSONResponse:
@@ -404,7 +406,9 @@ class CodingAgentWebUIRouter(BaseRouter):
                         status_code=503,
                         content={"detail": "Frontend not available"},
                     )
-                return FileResponse(index_path)
+                resp = FileResponse(index_path)
+                resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+                return resp
         else:
             logger.warning(
                 f"前端构建产物不存在: {dist_dir}，"

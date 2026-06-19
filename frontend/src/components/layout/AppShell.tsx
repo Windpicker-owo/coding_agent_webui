@@ -1,5 +1,5 @@
 /** AppShell — 三栏布局壳 */
-import React, { useState, useCallback, useMemo, useRef } from "react";
+import React, { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import { useSession, useSessionDispatch } from "../../hooks/useSession.ts";
 import { getWSClient } from "../../utils/ws-client.ts";
 import { SessionList } from "../session/SessionList.tsx";
@@ -20,10 +20,12 @@ import {
   Monitor,
   Smartphone,
   Settings,
+  FolderOpen,
 } from "lucide-react";
 import { DirectoryPicker } from "./DirectoryPicker.tsx";
 import { AvatarUpload } from "./AvatarUpload.tsx";
 import { SettingsPanel } from "../settings/SettingsPanel.tsx";
+import { normalizePath } from "../../utils/path-utils";
 
 interface AppShellProps {
   onDisconnect: () => void;
@@ -91,6 +93,16 @@ export function AppShell({ onDisconnect }: AppShellProps) {
   const [showSettings, setShowSettings] = useState(false);
   const statsRef = useRef<HTMLDivElement>(null);
 
+  // 监听 ChatArea 发出的"打开项目"自定义事件
+  useEffect(() => {
+    const handler = () => {
+      setNewWorkDir(state.lastWorkDir || ".");
+      setShowOpenProjectDialog(true);
+    };
+    window.addEventListener("open-project-dialog", handler);
+    return () => window.removeEventListener("open-project-dialog", handler);
+  }, [state.lastWorkDir]);
+
   React.useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (showStatsPanel && statsRef.current && !statsRef.current.contains(e.target as Node)) {
@@ -106,6 +118,18 @@ export function AppShell({ onDisconnect }: AppShellProps) {
     window.addEventListener("open-avatar-upload", handler);
     return () => window.removeEventListener("open-avatar-upload", handler);
   }, []);
+
+  React.useEffect(() => {
+    const mql = window.matchMedia('(min-width: 1024px)');
+    const handleMatch = (e: MediaQueryListEvent) => {
+      if (state.ideMode && e.matches) {
+        return; // 开启IDE模式时，如果在宽屏下则保持当前状态，不自动展开
+      }
+      setSidebarOpen(e.matches);
+    };
+    mql.addEventListener('change', handleMatch);
+    return () => mql.removeEventListener('change', handleMatch);
+  }, [state.ideMode]);
 
   const handleOpenProjectClick = useCallback(() => {
     setNewWorkDir(state.lastWorkDir || ".");
@@ -145,6 +169,7 @@ export function AppShell({ onDisconnect }: AppShellProps) {
     dispatch({ type: "RESET_SESSION" });
     dispatch({ type: "SET_LAST_WORK_DIR", payload: newWorkDir.trim() });
     dispatch({ type: "SET_LAST_SESSION_ID", payload: "" });
+    dispatch({ type: "ADD_RECENT_PROJECT", payload: newWorkDir.trim() });
     try {
       client.send("project.open", {
         working_directory: newWorkDir.trim(),
@@ -221,8 +246,16 @@ export function AppShell({ onDisconnect }: AppShellProps) {
             )}
 
             {state.projectName && (
-              <span className={`text-sm ${state.desktopMode ? "font-semibold text-gray-800 dark:text-gray-200" : "text-gray-500 dark:text-gray-400"} truncate hidden sm:inline`}>
+              <span
+                className={`text-sm ${state.desktopMode ? "font-semibold text-gray-800 dark:text-gray-200" : "text-gray-500 dark:text-gray-400"} truncate hidden sm:inline cursor-default`}
+                title={`项目路径: ${state.lastWorkDir}`}
+              >
                 {state.projectName}
+              </span>
+            )}
+            {state.lastWorkDir && state.lastWorkDir !== "." && (
+              <span className="text-xs text-gray-400 dark:text-gray-600 truncate hidden md:inline font-mono" title={state.lastWorkDir}>
+                {state.lastWorkDir}
               </span>
             )}
             <span
@@ -451,12 +484,70 @@ export function AppShell({ onDisconnect }: AppShellProps) {
           </div>
         )}
 
-        {/* ── 中间聊天区 + 右侧面板 ── */}
+        {/* ── 中间内容区 ── */}
         <div className="flex-1 flex overflow-hidden min-h-0 relative">
-          <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-white dark:bg-gray-950">
-            <ChatArea />
-          </div>
-          <RightPanel />
+          {!state.projectName ? (
+            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-gray-50/50 dark:bg-gray-900/50 overflow-y-auto">
+              <div className="w-24 h-24 mb-6 rounded-3xl bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center shadow-inner">
+                <img src="/logo.png" alt="MoFox Logo" className="w-16 h-16 object-cover" />
+              </div>
+              <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">欢迎来到 MoFox Code</h2>
+              <p className="text-gray-500 dark:text-gray-400 max-w-md mb-8 text-sm">
+                您目前还没有打开任何项目。请先打开或关联一个本地项目，以便 MoFox 了解您的代码上下文。
+              </p>
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={() => {
+                    setNewWorkDir(state.lastWorkDir || ".");
+                    setShowOpenProjectDialog(true);
+                  }}
+                  className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-medium transition-all shadow-sm hover:shadow text-sm"
+                >
+                  <FolderOpen size={18} />
+                  打开本地项目
+                </button>
+              </div>
+              {state.recentProjects.length > 0 && (
+                <div className="mt-12 text-left w-full max-w-md">
+                  <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 px-2">最近打开</h3>
+                  <div className="space-y-1">
+                    {state.recentProjects.slice(0, 5).map((dir) => (
+                      <button
+                        key={dir}
+                        onClick={() => {
+                          const client = getWSClient();
+                          const normalized = normalizePath(dir);
+                          dispatch({ type: "SET_CONNECTION", payload: "reconnecting" });
+                          dispatch({ type: "RESET_SESSION" });
+                          dispatch({ type: "SET_LAST_WORK_DIR", payload: normalized });
+                          dispatch({ type: "SET_LAST_SESSION_ID", payload: "" });
+                          client.send("project.open", { working_directory: normalized });
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-3 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 border border-gray-100 dark:border-gray-800 rounded-xl transition-all text-left group"
+                      >
+                        <Folder size={18} className="text-blue-500 opacity-70 group-hover:opacity-100 transition-opacity shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                            {dir.split(/[\\/]/).pop() || dir}
+                          </div>
+                          <div className="text-xs text-gray-400 truncate">
+                            {dir}
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <>
+              <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-white dark:bg-gray-950">
+                <ChatArea />
+              </div>
+              <RightPanel />
+            </>
+          )}
         </div>
       </div>
 

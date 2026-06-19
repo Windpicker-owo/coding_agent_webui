@@ -101,6 +101,16 @@ function App() {
     document.body.style.backgroundColor = state.theme === 'dark' ? '#030712' : '#ffffff';
   }, [state.theme]);
 
+  // 桌面模式：缩小根字号提升信息密度
+  useEffect(() => {
+    const root = document.documentElement;
+    if (desktopMode) {
+      root.classList.add("desktop-mode");
+    } else {
+      root.classList.remove("desktop-mode");
+    }
+  }, [desktopMode]);
+
   // 持久化偏好到 localStorage
   useEffect(() => {
     try {
@@ -110,11 +120,13 @@ function App() {
         ideMode: state.ideMode,
         lastWorkDir: state.lastWorkDir,
         lastSessionId: state.lastSessionId,
+        recentProjects: state.recentProjects,
+        imageUploadConfirmed: state.imageUploadConfirmed,
       }));
     } catch {
       // ignore
     }
-  }, [state.wsUrl, state.theme, state.ideMode, state.lastWorkDir, state.lastSessionId]);
+  }, [state.wsUrl, state.theme, state.ideMode, state.lastWorkDir, state.lastSessionId, state.recentProjects, state.imageUploadConfirmed]);
 
   const handleConnect = useCallback(async (customUrl?: string) => {
     const url = typeof customUrl === "string" ? customUrl : state.wsUrl;
@@ -180,35 +192,9 @@ function App() {
 
   // 连接建立后，优先尝试恢复上一次会话；否则由 AppShell 弹出“打开项目目录”对话框
   useEffect(() => {
-    if (!state.isConnected || state.sessionId || sessionBootstrapRef.current) {
-      return;
-    }
-
-    const lastWorkDir = state.lastWorkDir.trim();
-    if (!lastWorkDir) {
-      return;
-    }
-
-    sessionBootstrapRef.current = true;
-    dispatch({ type: "SET_CONNECTION", payload: "reconnecting" });
-    try {
-      getWSClient().send("project.open", {
-        working_directory: lastWorkDir,
-      });
-    } catch (e) {
-      sessionBootstrapRef.current = false;
-      dispatch({ type: "SET_CONNECTION", payload: "open" });
-      setTimeout(() => {
-        setError(e instanceof Error ? e.message : "恢复上次会话失败");
-      }, 0);
-    }
-  }, [
-    state.isConnected,
-    state.sessionId,
-    state.lastSessionId,
-    state.lastWorkDir,
-    dispatch,
-  ]);
+    // 连接建立后不再自动打开项目，由用户手动操作。
+    return;
+  }, [state.isConnected, state.sessionId, state.lastSessionId, state.lastWorkDir, dispatch]);
 
   // 连接成功后拉取后端 UI 配置（仅一次）
   useEffect(() => {
@@ -231,7 +217,7 @@ function App() {
         }
       })
       .catch(() => {
-        // 保持默认 /logo.png
+        // 保持默认 /bot-avatar.png
       });
     return () => {
       cancelled = true;
@@ -276,7 +262,7 @@ function App() {
             <div className="relative inline-block mb-4">
               <div className="absolute inset-0 bg-blue-500 blur-xl opacity-30 dark:opacity-50 animate-pulse rounded-full"></div>
               <div className="w-20 h-20 mx-auto rounded-2xl bg-blue-600 flex items-center justify-center shadow-lg relative overflow-hidden ring-4 ring-white dark:ring-gray-800">
-                <img src={state.avatarUrl || "/logo.png"} alt="MoFox Logo" className="w-full h-full object-cover" />
+                <img src={state.avatarUrl || "/bot-avatar.png"} alt="MoFox Logo" className="w-full h-full object-cover" />
               </div>
             </div>
             <h1 className="text-3xl font-extrabold mb-2 bg-gradient-to-br from-gray-900 to-gray-600 dark:from-white dark:to-gray-300 bg-clip-text text-transparent tracking-tight">MoFox Code</h1>

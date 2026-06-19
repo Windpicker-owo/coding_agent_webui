@@ -1,7 +1,7 @@
 {
     "name": "coding_agent_webui",
     "display_name": "Coding Agent WebUI",
-    "version": "0.3.4",
+    "version": "0.3.6",
     "description": "Coding Agent 浏览器端 WebUI，基于 React + Vite",
     "author": "MoFox Team",
     "dependencies": {

@@ -195,6 +195,13 @@ export interface ProjectOpenedMessage {
   };
 }
 
+export interface SessionListMultiResultMessage {
+  type: "session.list_multi_result";
+  payload: {
+    projects: Record<string, SessionSummary[]>;
+  };
+}
+
 export interface SessionDeleteResultMessage {
   type: "session.delete_result";
   payload: {
@@ -340,6 +347,7 @@ export interface ModelSelectedMessage {
 export type ServerMessage =
   | SessionReadyMessage
   | SessionListResultMessage
+  | SessionListMultiResultMessage
   | SessionDeleteResultMessage
   | SessionRenameResultMessage
   | AgentStatusMessage
@@ -452,6 +460,7 @@ export interface ClientMessage {
     | "project.open"
     | "user.message"
     | "session.list"
+    | "session.list_multi"
     | "session.delete"
     | "session.rename"
     | "console.approval"

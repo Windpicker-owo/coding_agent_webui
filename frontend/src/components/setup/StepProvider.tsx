@@ -1,9 +1,9 @@
 /**
  * StepProvider — API Provider 及模型分配配置
  */
-
-import { Plus, Trash2, Settings2, Database } from "lucide-react";
-import type { ApiProviderConfig, ModelAssignment, SetupState } from "../../hooks/useSetup.ts";
+import { useState } from "react";
+import { Plus, Trash2, Settings2, Database, ChevronDown, ChevronRight } from "lucide-react";
+import type { ApiProviderConfig, ModelAssignment, SetupState, ModelDetailConfig } from "../../hooks/useSetup.ts";
 
 interface StepProviderProps {
   apiProviders: ApiProviderConfig[];
@@ -12,6 +12,14 @@ interface StepProviderProps {
   onUpdateProvider: (id: string, partial: Partial<Omit<ApiProviderConfig, "id">>) => void;
   onRemoveProvider: (id: string) => void;
   onUpdateModelAssignment: (role: keyof SetupState["modelsAssignment"], assignment: Partial<ModelAssignment>) => void;
+  /** 模型详情列表（可选，用于 SettingsPanel） */
+  models?: ModelDetailConfig[];
+  /** 更新模型详情 */
+  onUpdateModel?: (index: number, partial: Partial<ModelDetailConfig>) => void;
+  /** 添加模型 */
+  onAddModel?: () => void;
+  /** 删除模型 */
+  onRemoveModel?: (index: number) => void;
 }
 
 export function StepProvider({
@@ -21,12 +29,31 @@ export function StepProvider({
   onUpdateProvider,
   onRemoveProvider,
   onUpdateModelAssignment,
+  models,
+  onUpdateModel,
+  onAddModel,
+  onRemoveModel,
 }: StepProviderProps) {
   const fieldClass =
     "w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 text-sm transition-all";
   const labelClass =
     "block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5";
   const hintClass = "text-xs text-gray-400 dark:text-gray-500 mt-1";
+
+  // Track which providers have advanced settings expanded
+  const [expandedAdvanced, setExpandedAdvanced] = useState<Set<string>>(new Set());
+
+  const toggleAdvanced = (providerId: string) => {
+    setExpandedAdvanced((prev) => {
+      const next = new Set(prev);
+      if (next.has(providerId)) {
+        next.delete(providerId);
+      } else {
+        next.add(providerId);
+      }
+      return next;
+    });
+  };
 
   const roles: Array<{ key: keyof SetupState["modelsAssignment"]; label: string; desc: string }> = [
     { key: "main", label: "主模型 (Main)", desc: "用于日常对话和基础任务" },
@@ -35,6 +62,8 @@ export function StepProvider({
     { key: "reviewer", label: "审查模型 (Reviewer)", desc: "用于代码审查和质量控制" },
     { key: "title", label: "标题模型 (Title)", desc: "用于生成对话标题（建议用小模型）" },
   ];
+
+  const showModelDetails = !!(models && onUpdateModel && onAddModel && onRemoveModel);
 
   return (
     <div className="space-y-10 animate-fade-in">
@@ -121,6 +150,70 @@ export function StepProvider({
                   />
                 </div>
               </div>
+
+              {/* Advanced Settings Collapsible */}
+              <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-800">
+                <button
+                  onClick={() => toggleAdvanced(provider.id)}
+                  className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+                >
+                  {expandedAdvanced.has(provider.id) ? (
+                    <ChevronDown size={14} />
+                  ) : (
+                    <ChevronRight size={14} />
+                  )}
+                  高级设置
+                </button>
+                {expandedAdvanced.has(provider.id) && (
+                  <div className="mt-3 grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1 block">
+                        最大重试次数
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={10}
+                        value={provider.max_retry ?? 2}
+                        onChange={(e) =>
+                          onUpdateProvider(provider.id, { max_retry: parseInt(e.target.value) || 0 })
+                        }
+                        className="w-full px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs text-gray-900 dark:text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1 block">
+                        超时（秒）
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={600}
+                        value={provider.timeout ?? 30}
+                        onChange={(e) =>
+                          onUpdateProvider(provider.id, { timeout: parseInt(e.target.value) || 30 })
+                        }
+                        className="w-full px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs text-gray-900 dark:text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1 block">
+                        重试间隔（秒）
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={120}
+                        value={provider.retry_interval ?? 10}
+                        onChange={(e) =>
+                          onUpdateProvider(provider.id, { retry_interval: parseInt(e.target.value) || 0 })
+                        }
+                        className="w-full px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs text-gray-900 dark:text-white"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           ))}
         </div>
@@ -174,6 +267,162 @@ export function StepProvider({
           })}
         </div>
       </div>
+
+      {/* Model Details Section (only when props are provided) */}
+      {showModelDetails && (
+        <div className="space-y-4 pt-6 border-t border-gray-100 dark:border-gray-800">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Settings2 className="w-5 h-5 text-green-500" />
+              <h3 className="text-xl font-bold">模型详情</h3>
+            </div>
+            <button
+              onClick={onAddModel}
+              className="flex items-center gap-1.5 text-sm font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 bg-blue-50 dark:bg-blue-900/30 px-3 py-1.5 rounded-lg transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              添加模型
+            </button>
+          </div>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+            配置每个模型的详细参数，包括价格、上下文长度、流模式等。
+          </p>
+
+          <div className="space-y-4">
+            {models!.map((m, i) => (
+              <div key={i} className="p-4 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-sm font-bold text-gray-800 dark:text-gray-200">
+                    模型 #{i + 1}
+                  </h4>
+                  <button
+                    onClick={() => onRemoveModel!(i)}
+                    className="text-gray-400 hover:text-red-500 transition-colors p-1"
+                    title="删除模型"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1 block">Model ID</label>
+                    <input
+                      type="text"
+                      value={m.model_id}
+                      onChange={(e) => onUpdateModel!(i, { model_id: e.target.value })}
+                      className="w-full px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs text-gray-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1 block">API Provider</label>
+                    <input
+                      type="text"
+                      value={m.api_provider}
+                      onChange={(e) => onUpdateModel!(i, { api_provider: e.target.value })}
+                      className="w-full px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs text-gray-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1 block">最大上下文</label>
+                    <input
+                      type="number"
+                      value={m.max_context}
+                      onChange={(e) => onUpdateModel!(i, { max_context: parseInt(e.target.value) || 0 })}
+                      className="w-full px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs text-gray-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1 block">输入价格 ($/M tokens)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={m.price_in}
+                      onChange={(e) => onUpdateModel!(i, { price_in: parseFloat(e.target.value) || 0 })}
+                      className="w-full px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs text-gray-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1 block">输出价格 ($/M tokens)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={m.price_out}
+                      onChange={(e) => onUpdateModel!(i, { price_out: parseFloat(e.target.value) || 0 })}
+                      className="w-full px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs text-gray-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1 block">缓存命中价格 ($/M tokens)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={m.cache_hit_price_in ?? ""}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        onUpdateModel!(i, { cache_hit_price_in: val === "" ? null : parseFloat(val) });
+                      }}
+                      className="w-full px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs text-gray-900 dark:text-white"
+                    />
+                  </div>
+                  <div className="col-span-2 flex items-center gap-6 pt-1">
+                    <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
+                      <input
+                        type="checkbox"
+                        checked={m.force_stream_mode}
+                        onChange={(e) => onUpdateModel!(i, { force_stream_mode: e.target.checked })}
+                        className="rounded"
+                      />
+                      强制流模式
+                    </label>
+                    <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
+                      <input
+                        type="checkbox"
+                        checked={m.tool_call_compat}
+                        onChange={(e) => onUpdateModel!(i, { tool_call_compat: e.target.checked })}
+                        className="rounded"
+                      />
+                      工具调用兼容
+                    </label>
+                    <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
+                      <input
+                        type="checkbox"
+                        checked={m.anti_truncation}
+                        onChange={(e) => onUpdateModel!(i, { anti_truncation: e.target.checked })}
+                        className="rounded"
+                      />
+                      防截断
+                    </label>
+                  </div>
+                  <div className="col-span-2">
+                    <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1 block">
+                      Extra Params (JSON)
+                    </label>
+                    <textarea
+                      value={JSON.stringify(m.extra_params, null, 2)}
+                      onChange={(e) => {
+                        try {
+                          const parsed = JSON.parse(e.target.value);
+                          onUpdateModel!(i, { extra_params: parsed });
+                        } catch {
+                          // Allow typing invalid JSON temporarily
+                        }
+                      }}
+                      rows={3}
+                      className="w-full px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs text-gray-900 dark:text-white font-mono"
+                      placeholder='{"key": "value"}'
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
+            {(!models || models.length === 0) && (
+              <div className="text-xs text-gray-400 dark:text-gray-600 text-center py-4">
+                暂无模型详情配置，点击"添加模型"开始
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

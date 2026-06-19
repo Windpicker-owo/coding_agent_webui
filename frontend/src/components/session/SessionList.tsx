@@ -1,9 +1,10 @@
 /** 历史会话侧边栏 */
-import { useState, useEffect, useCallback, useRef } from "react";
-import { useSession, useSessionDispatch } from "../../hooks/useSession.ts";
-import { getWSClient } from "../../utils/ws-client.ts";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { useSession, useSessionDispatch } from "../../hooks/useSession";
+import { getWSClient } from "../../utils/ws-client";
 import type { SessionSummary } from "../../types/messages";
-import { Folder, FolderOpen, Loader2, Menu, Plus } from "lucide-react";
+import { Folder, FolderOpen, Loader2, Menu, Plus, ChevronDown, ChevronRight, MessageSquare, Trash2, Edit2, Check, X } from "lucide-react";
+import { normalizePath } from "../../utils/path-utils";
 
 interface SessionListProps {
   onNewSession: () => void;
@@ -14,49 +15,52 @@ interface SessionListProps {
 
 export function SessionList({ onNewSession, onOpenProject, collapsed, onToggle }: SessionListProps) {
   const state = useSession();
-  const { sessionId, isConnected, lastWorkDir, sessions, phase, yoloMode, pendingApproval, messages } = state;
+  const { sessionId, isConnected, lastWorkDir, sessions, multiSessions, phase, yoloMode, pendingApproval, messages, recentProjects } = state;
   const dispatch = useSessionDispatch();
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const editInputRef = useRef<HTMLInputElement | null>(null);
+  const [expandedDirs, setExpandedDirs] = useState<Record<string, boolean>>({});
   // YOLO 警告：切走工作中的非 YOLO 会话时弹确认
-  const [pendingResume, setPendingResume] = useState<SessionSummary | null>(null);
+  const [pendingResume, setPendingResume] = useState<{s: SessionSummary, dir: string} | null>(null);
 
   const refreshList = useCallback(() => {
     setLoading(true);
     try {
-      getWSClient().send("session.list", {});
+      const dirsToFetch = Array.from(new Set([lastWorkDir, ...recentProjects].filter(Boolean).map(normalizePath)));
+      getWSClient().send("session.list_multi", { directories: dirsToFetch });
     } catch {
       setLoading(false);
     }
-  }, []);
+  }, [lastWorkDir, recentProjects]);
 
   // 连接后自动拉取历史
   useEffect(() => {
-    if (isConnected && lastWorkDir) {
+    if (isConnected) {
       refreshList();
     }
-  }, [isConnected, lastWorkDir, refreshList]);
+  }, [isConnected, refreshList]);
 
-  // 当 sessions 更新时清除 loading 状态
+  // 当 multiSessions 更新时清除 loading 状态
   useEffect(() => {
     setLoading(false);
-  }, [sessions]);
+  }, [multiSessions]);
 
   // 每 10 秒自动刷新会话列表（静默，不触发 loading）
   useEffect(() => {
-    if (!isConnected || !lastWorkDir) return;
+    if (!isConnected) return;
     const interval = setInterval(() => {
       try {
-        getWSClient().send("session.list", {});
+        const dirsToFetch = Array.from(new Set([lastWorkDir, ...recentProjects].filter(Boolean).map(normalizePath)));
+        getWSClient().send("session.list_multi", { directories: dirsToFetch });
       } catch {
         // 静默忽略
       }
     }, 10000);
     return () => clearInterval(interval);
-  }, [isConnected, lastWorkDir]);
+  }, [isConnected, lastWorkDir, recentProjects]);
 
   // 检测当前会话是否在工作中（用于 YOLO 警告）：phase + pendingApproval + running tool_call
   const isCurrentWorking = useCallback(() => {
@@ -74,38 +78,39 @@ export function SessionList({ onNewSession, onOpenProject, collapsed, onToggle }
   const isWorkingPhase = (p: string) => p === "thinking" || p === "coding" || p === "researching";
 
   const handleResume = useCallback(
-    (s: SessionSummary) => {
+    (s: SessionSummary, dir: string) => {
       if (s.session_id === sessionId) return;
       // 当前会话正在工作中且非 YOLO 模式 → 弹出警告
       if (isCurrentWorking() && !yoloMode && sessionId) {
-        setPendingResume(s);
+        setPendingResume({ s, dir });
         return;
       }
-      doResume(s);
+      doResume(s, dir);
     },
-    [sessionId, isCurrentWorking, yoloMode, dispatch, lastWorkDir]
+    [sessionId, isCurrentWorking, yoloMode]
   );
 
   const doResume = useCallback(
-    (s: SessionSummary) => {
+    (s: SessionSummary, dir: string) => {
       const client = getWSClient();
       dispatch({ type: "SET_CONNECTION", payload: "reconnecting" });
       dispatch({ type: "RESET_SESSION" });
+      dispatch({ type: "SET_LAST_WORK_DIR", payload: dir });
       try {
         client.send("session.init", {
-          working_directory: lastWorkDir || ".",
+          working_directory: dir,
           session_id: s.session_id,
         });
       } catch {
         dispatch({ type: "SET_CONNECTION", payload: "open" });
       }
     },
-    [dispatch, lastWorkDir]
+    [dispatch]
   );
 
   const confirmResume = useCallback(() => {
     if (pendingResume) {
-      doResume(pendingResume);
+      doResume(pendingResume.s, pendingResume.dir);
       setPendingResume(null);
     }
   }, [pendingResume, doResume]);
@@ -115,20 +120,22 @@ export function SessionList({ onNewSession, onOpenProject, collapsed, onToggle }
   }, []);
 
   const handleDelete = useCallback(
-    (s: SessionSummary) => {
+    (s: SessionSummary, dir: string) => {
       if (!confirm(`确定删除会话 "${s.title || s.session_id.slice(0, 8)}"？`))
         return;
       try {
-        getWSClient().send("session.delete", { session_id: s.session_id });
+        getWSClient().send("session.delete", { session_id: s.session_id, working_directory: dir });
+        // Optimistic update for multiSessions
+        const updatedDirSessions = (multiSessions[dir] || []).filter((x: SessionSummary) => x.session_id !== s.session_id);
         dispatch({
-          type: "SET_SESSIONS",
-          payload: sessions.filter((x) => x.session_id !== s.session_id),
+          type: "SET_MULTI_SESSIONS",
+          payload: { ...multiSessions, [dir]: updatedDirSessions },
         });
       } catch {
         // ignore
       }
     },
-    [sessions, dispatch]
+    [multiSessions, dispatch]
   );
 
   const handleRename = useCallback(
@@ -150,12 +157,16 @@ export function SessionList({ onNewSession, onOpenProject, collapsed, onToggle }
           session_id: editingId,
           title: trimmed,
         });
-        // Optimistically update local state
+        // Optimistically update multiSessions
+        const newMultiSessions = { ...multiSessions };
+        for (const dir in newMultiSessions) {
+          newMultiSessions[dir] = newMultiSessions[dir].map((x: SessionSummary) =>
+            x.session_id === editingId ? { ...x, title: trimmed } : x
+          );
+        }
         dispatch({
-          type: "SET_SESSIONS",
-          payload: sessions.map((s) =>
-            s.session_id === editingId ? { ...s, title: trimmed } : s
-          ),
+          type: "SET_MULTI_SESSIONS",
+          payload: newMultiSessions,
         });
       } catch {
         // ignore
@@ -163,21 +174,29 @@ export function SessionList({ onNewSession, onOpenProject, collapsed, onToggle }
     }
     setEditingId(null);
     setEditTitle("");
-  }, [editingId, editTitle, sessions, dispatch]);
+  }, [editingId, editTitle, multiSessions, dispatch]);
 
   const cancelRename = useCallback(() => {
     setEditingId(null);
     setEditTitle("");
   }, []);
 
-  const filtered = sessions
-    .filter(
-      (s) =>
-        !search ||
-        s.title.toLowerCase().includes(search.toLowerCase()) ||
-        s.session_id.includes(search)
-    )
-    .sort((a, b) => b.last_active_at - a.last_active_at);
+  const toggleDir = useCallback((dir: string) => {
+    setExpandedDirs(prev => ({ ...prev, [dir]: prev[dir] === false ? true : false }));
+  }, []);
+
+  const handleCloseDir = useCallback((dir: string) => {
+    const normalized = normalizePath(dir);
+    const isCurrent = normalizePath(lastWorkDir) === normalized;
+    if (isCurrent) {
+      if (!confirm(`当前正在使用项目 "${dir.split(/[\\/]/).pop() || dir}"，关闭将从列表中移除该项目。确定继续？`)) {
+        return;
+      }
+    }
+    dispatch({ type: "REMOVE_RECENT_PROJECT", payload: dir });
+  }, [lastWorkDir, dispatch]);
+
+  const dirsToDisplay = Array.from(new Set([lastWorkDir, ...recentProjects].filter(Boolean).map(normalizePath)));
 
   if (collapsed) {
     return (
@@ -250,7 +269,7 @@ export function SessionList({ onNewSession, onOpenProject, collapsed, onToggle }
 
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2.5">
-        <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">历史会话</span>
+        <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">项目</span>
         <div className="flex items-center gap-1">
           <button
             onClick={refreshList}
@@ -281,100 +300,150 @@ export function SessionList({ onNewSession, onOpenProject, collapsed, onToggle }
       </div>
 
       {/* 列表 */}
-      <div className="flex-1 overflow-y-auto">
-        {loading && sessions.length === 0 ? (
+      <div className="flex-1 overflow-y-auto pb-4">
+        {loading && dirsToDisplay.length === 0 ? (
           <div className="p-3 text-xs text-gray-400 dark:text-gray-500 text-center">加载中...</div>
-        ) : filtered.length === 0 ? (
+        ) : dirsToDisplay.length === 0 ? (
           <div className="p-3 text-xs text-gray-400 dark:text-gray-600 text-center">
-            {search ? "无匹配会话" : "暂无历史会话"}
+            暂无项目
           </div>
         ) : (
-          filtered.map((s) => (
-            <div
-              key={s.session_id}
-              onClick={() => {
-                if (editingId && editingId !== s.session_id) {
-                  cancelRename();
-                }
-                if (editingId !== s.session_id) {
-                  handleResume(s);
-                }
-              }}
-              className={`group mx-2 my-0.5 px-3 py-2 cursor-pointer rounded-lg transition-all ${
-                s.session_id === sessionId
-                  ? "bg-blue-50/80 dark:bg-blue-900/20 shadow-sm"
-                  : "hover:bg-gray-50 dark:hover:bg-gray-900/50"
-              }`}
-            >
-              <div className="flex items-start justify-between">
-                <div className="min-w-0 flex-1">
-                  {editingId === s.session_id ? (
-                    <input
-                      ref={editInputRef}
-                      type="text"
-                      value={editTitle}
-                      onChange={(e) => setEditTitle(e.target.value.slice(0, 60))}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          commitRename();
-                        } else if (e.key === "Escape") {
-                          e.preventDefault();
-                          cancelRename();
-                        }
-                      }}
-                      onBlur={commitRename}
-                      onClick={(e) => e.stopPropagation()}
-                      className="w-full px-1.5 py-0.5 text-xs bg-white dark:bg-gray-700 border border-blue-400 dark:border-blue-500 rounded text-gray-900 dark:text-white focus:outline-none"
-                      maxLength={60}
-                    />
+          dirsToDisplay.map((dir) => {
+            const name = dir.split(/[\\/]/).pop() || dir;
+            const dirSessions = multiSessions[dir] || [];
+            const filteredDirSessions = dirSessions
+              .filter(
+                (x: SessionSummary) =>
+                  !search ||
+                  x.title.toLowerCase().includes(search.toLowerCase()) ||
+                  x.session_id.includes(search)
+              )
+              .sort((a: SessionSummary, b: SessionSummary) => b.last_active_at - a.last_active_at);
+
+            // 如果有搜索词且当前目录下没有匹配项，则隐藏该目录
+            if (search && filteredDirSessions.length === 0) return null;
+
+            const isExpanded = expandedDirs[dir] !== false; // 默认展开
+
+            return (
+              <div key={dir} className="mb-2">
+                <button
+                  onClick={() => toggleDir(dir)}
+                  className="w-full flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-900/50 rounded-lg transition-colors group/dir"
+                >
+                  <Folder size={14} className="text-gray-400 shrink-0" />
+                  <span className="text-xs font-medium text-gray-700 dark:text-gray-300 flex-1 truncate text-left">{name}</span>
+                  {isExpanded ? (
+                    <ChevronDown size={12} className="text-gray-400 shrink-0" />
                   ) : (
-                    <div
-                      className="text-xs font-medium text-gray-800 dark:text-gray-300 truncate"
-                      onDoubleClick={(e) => {
-                        e.stopPropagation();
-                        handleRename(s);
-                      }}
-                      title="双击重命名"
-                    >
-                      {s.title || s.session_id.slice(0, 8)}
-                    </div>
+                    <ChevronRight size={12} className="text-gray-400 shrink-0" />
                   )}
-                  <div className="text-xs text-gray-400 dark:text-gray-600 mt-0.5 flex items-center gap-1.5">
-                    {isWorkingPhase(s.phase) && (
-                      <Loader2 size={10} className="animate-spin text-blue-500 shrink-0" />
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleCloseDir(dir);
+                    }}
+                    className="opacity-0 group-hover/dir:opacity-100 text-gray-400 hover:text-red-400 transition-all p-0.5 shrink-0"
+                    title="关闭项目"
+                  >
+                    <X size={12} />
+                  </button>
+                </button>
+                
+                {isExpanded && (
+                  <div className="pl-4 ml-[19px] border-l border-gray-100 dark:border-gray-800 mt-0.5 flex flex-col gap-0.5">
+                    {filteredDirSessions.length === 0 ? (
+                      <div className="text-xs text-gray-400 dark:text-gray-600 py-1 pl-2">无历史会话</div>
+                    ) : (
+                      filteredDirSessions.map((s: SessionSummary) => (
+                        <div
+                          key={s.session_id}
+                          onClick={() => {
+                            if (editingId && editingId !== s.session_id) {
+                              cancelRename();
+                            }
+                            if (editingId !== s.session_id) {
+                              handleResume(s, dir);
+                            }
+                          }}
+                          className={`group/item px-2 py-1.5 cursor-pointer rounded-lg transition-all flex items-start justify-between ${
+                            s.session_id === sessionId
+                              ? "bg-blue-50/80 dark:bg-blue-900/20 shadow-sm"
+                              : "hover:bg-gray-50 dark:hover:bg-gray-900/50"
+                          }`}
+                        >
+                          <div className="min-w-0 flex-1">
+                            {editingId === s.session_id ? (
+                              <input
+                                ref={editInputRef}
+                                type="text"
+                                value={editTitle}
+                                onChange={(e) => setEditTitle(e.target.value.slice(0, 60))}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    commitRename();
+                                  } else if (e.key === "Escape") {
+                                    e.preventDefault();
+                                    cancelRename();
+                                  }
+                                }}
+                                onBlur={commitRename}
+                                onClick={(e) => e.stopPropagation()}
+                                className="w-full px-1.5 py-0.5 text-xs bg-white dark:bg-gray-700 border border-blue-400 dark:border-blue-500 rounded text-gray-900 dark:text-white focus:outline-none"
+                                maxLength={60}
+                              />
+                            ) : (
+                              <div
+                                className="text-xs text-gray-800 dark:text-gray-300 truncate pr-2"
+                                onDoubleClick={(e) => {
+                                  e.stopPropagation();
+                                  handleRename(s);
+                                }}
+                                title="双击重命名"
+                              >
+                                {s.title || s.session_id.slice(0, 8)}
+                              </div>
+                            )}
+                            <div className="text-[10px] text-gray-400 dark:text-gray-600 mt-0.5 flex items-center gap-1.5">
+                              {isWorkingPhase(s.phase) && (
+                                <Loader2 size={10} className="animate-spin text-blue-500 shrink-0" />
+                              )}
+                              <span>
+                                {s.message_count} 条 · {new Date(s.last_active_at * 1000).toLocaleDateString()}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-0.5 ml-1 pt-0.5">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRename(s);
+                              }}
+                              className="opacity-0 group-hover/item:opacity-100 text-gray-400 hover:text-blue-400 text-xs transition-all p-1"
+                              title="重命名"
+                            >
+                              ✎
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDelete(s, dir);
+                              }}
+                              className="opacity-0 group-hover/item:opacity-100 text-gray-400 hover:text-red-400 text-xs transition-all p-1"
+                              title="删除"
+                            >
+                              🗑
+                            </button>
+                          </div>
+                        </div>
+                      ))
                     )}
-                    <span>
-                      {s.message_count} 条消息 ·{" "}
-                      {new Date(s.last_active_at * 1000).toLocaleDateString()}
-                    </span>
                   </div>
-                </div>
-                <div className="flex items-center gap-0.5 ml-1">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleRename(s);
-                    }}
-                    className="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-blue-400 text-xs transition-all"
-                    title="重命名"
-                  >
-                    ✎
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDelete(s);
-                    }}
-                    className="opacity-0 group-hover:opacity-100 text-gray-600 hover:text-red-400 text-xs transition-all"
-                    title="删除"
-                  >
-                    🗑
-                  </button>
-                </div>
+                )}
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
 

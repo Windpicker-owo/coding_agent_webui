@@ -32,6 +32,7 @@ import {
   closePendingThinkingForSource,
   closeStreamingForSource,
 } from "../utils/message-utils";
+import { normalizePath } from "../utils/path-utils";
 
 // ─── 状态模型 ────────────────────────────────────────────
 
@@ -82,6 +83,8 @@ export interface SessionState {
   activeStreamId: string | null;
   /** 历史会话列表 */
   sessions: SessionSummary[];
+  /** 多项目分组的历史会话列表 */
+  multiSessions: Record<string, SessionSummary[]>;
   /** 项目信息 */
   projectInfo: {
     name: string;
@@ -107,6 +110,10 @@ export interface SessionState {
   draftTexts: Record<string, string>;
   /** 桌面版模式标记 */
   desktopMode: boolean;
+  /** 最近打开的项目目录列表 */
+  recentProjects: string[];
+  /** 是否已确认图片上传警告 */
+  imageUploadConfirmed: boolean;
 }
 
 /** 从 localStorage 读取持久化偏好 */
@@ -116,6 +123,8 @@ function loadPersistedPrefs(): {
   ideMode: boolean;
   lastWorkDir: string;
   lastSessionId: string;
+  recentProjects: string[];
+  imageUploadConfirmed: boolean;
 } {
   try {
     const raw = localStorage.getItem("mofox-code-prefs");
@@ -125,8 +134,10 @@ function loadPersistedPrefs(): {
         wsUrl: parsed.wsUrl || "ws://127.0.0.1:8765/coding-agent/ws",
         theme: parsed.theme === "light" ? "light" : "dark",
         ideMode: !!parsed.ideMode,
-        lastWorkDir: parsed.lastWorkDir || ".",
-        lastSessionId: parsed.lastSessionId || "",
+        lastWorkDir: "", // 不从 localStorage 恢复，始终以空状态启动
+        lastSessionId: "", // 不从 localStorage 恢复，始终以空状态启动
+        recentProjects: parsed.recentProjects || [],
+        imageUploadConfirmed: parsed.imageUploadConfirmed ?? false,
       };
     }
   } catch { /* ignore */ }
@@ -134,8 +145,10 @@ function loadPersistedPrefs(): {
     wsUrl: "ws://127.0.0.1:8765/coding-agent/ws",
     theme: "light",
     ideMode: false,
-    lastWorkDir: ".",
+    lastWorkDir: "",
     lastSessionId: "",
+    recentProjects: [],
+    imageUploadConfirmed: false,
   };
 }
 
@@ -165,6 +178,7 @@ const initialState: SessionState = {
   isConnected: false,
   activeStreamId: null,
   sessions: [],
+  multiSessions: {},
   projectInfo: null,
   lastWorkDir: persisted.lastWorkDir,
   lastSessionId: persisted.lastSessionId,
@@ -176,6 +190,8 @@ const initialState: SessionState = {
   activePreview: null,
   draftTexts: {},
   desktopMode: false,
+  recentProjects: persisted.recentProjects,
+  imageUploadConfirmed: persisted.imageUploadConfirmed,
 };
 
 // ─── Action 类型 ─────────────────────────────────────────
@@ -204,13 +220,17 @@ export type SessionAction =
   | { type: "SERVER_MESSAGE"; payload: ServerMessage }
   | { type: "SET_RECALL_CONTENT"; payload: string | null }
   | { type: "SET_SESSIONS"; payload: SessionSummary[] }
+  | { type: "SET_MULTI_SESSIONS"; payload: Record<string, SessionSummary[]> }
   | { type: "SET_PROJECT_INFO"; payload: { name: string; virtualEnv: string } }
   | { type: "SET_AVATAR_URL"; payload: string }
   | { type: "SET_AVAILABLE_MODELS"; payload: string[] }
   | { type: "SET_ACTIVE_MODEL"; payload: string }
   | { type: "SET_ACTIVE_PREVIEW"; payload: ContentPreviewInfo | null }
   | { type: "SAVE_DRAFT"; payload: { sessionId: string; text: string } }
-  | { type: "SET_DESKTOP_MODE"; payload: boolean };
+  | { type: "SET_DESKTOP_MODE"; payload: boolean }
+  | { type: "ADD_RECENT_PROJECT"; payload: string }
+  | { type: "REMOVE_RECENT_PROJECT"; payload: string }
+  | { type: "SET_IMAGE_UPLOAD_CONFIRMED"; payload: boolean };
 
 // ─── Reducer ─────────────────────────────────────────────
 
@@ -275,6 +295,7 @@ function sessionReducer(
         lastWorkDir: state.lastWorkDir,
         lastSessionId: state.lastSessionId,
         sessions: state.sessions,
+        multiSessions: state.multiSessions,
         connectionState: state.connectionState,
         isConnected: state.isConnected,
         recallContent: null,
@@ -283,6 +304,11 @@ function sessionReducer(
         draftTexts: state.draftTexts,
         ideMode: state.ideMode,
         desktopMode: state.desktopMode,
+        recentProjects: state.recentProjects,
+        imageUploadConfirmed: state.imageUploadConfirmed,
+        projectName: state.projectName,
+        projectInfo: state.projectInfo,
+        linkedDirs: state.linkedDirs,
       };
 
     case "CLEAR_PENDING_APPROVAL":
@@ -299,6 +325,9 @@ function sessionReducer(
 
     case "SET_SESSIONS":
       return { ...state, sessions: action.payload };
+
+    case "SET_MULTI_SESSIONS":
+      return { ...state, multiSessions: action.payload };
 
     case "SET_PROJECT_INFO":
       return { ...state, projectInfo: action.payload };
@@ -326,6 +355,36 @@ function sessionReducer(
 
     case "SET_DESKTOP_MODE":
       return { ...state, desktopMode: action.payload };
+
+    case "ADD_RECENT_PROJECT": {
+      const dir = normalizePath(action.payload.trim());
+      if (!dir) return state;
+      const filtered = state.recentProjects.filter((p) => normalizePath(p) !== dir);
+      return { ...state, recentProjects: [dir, ...filtered].slice(0, 10) };
+    }
+
+    case "REMOVE_RECENT_PROJECT": {
+      const dir = normalizePath(action.payload.trim());
+      if (!dir) return state;
+      const newRecent = state.recentProjects.filter((p) => normalizePath(p) !== dir);
+      const newMulti = { ...state.multiSessions };
+      delete newMulti[dir];
+      // Also remove from normalized variants in multiSessions keys
+      for (const key of Object.keys(newMulti)) {
+        if (normalizePath(key) === dir) {
+          delete newMulti[key];
+        }
+      }
+      return {
+        ...state,
+        recentProjects: newRecent,
+        multiSessions: newMulti,
+        lastWorkDir: normalizePath(state.lastWorkDir) === dir ? "" : state.lastWorkDir,
+      };
+    }
+
+    case "SET_IMAGE_UPLOAD_CONFIRMED":
+      return { ...state, imageUploadConfirmed: action.payload };
 
     default:
       return state;
@@ -599,11 +658,15 @@ function handleServerMessage(
     // ── 项目打开 ──
     case "project.opened": {
       const p = msg.payload;
+      const wd = normalizePath(p.working_directory);
+      const newRecent = wd
+        ? [wd, ...state.recentProjects.filter((pr) => normalizePath(pr) !== wd)].slice(0, 10)
+        : state.recentProjects;
       return {
         ...state,
         connectionState: "open",
         isConnected: true,
-        lastWorkDir: p.working_directory,
+        lastWorkDir: wd,
         projectName: p.project_name,
         sessions: p.sessions,
         sessionId: "",
@@ -616,32 +679,13 @@ function handleServerMessage(
         activeStreamId: null,
         phaseDetail: "",
         phase: "init",
+        recentProjects: newRecent,
       };
     }
 
     // ── Agent 状态变化 ──
     case "agent.status": {
       const source = msg.payload.source ?? "agent";
-      if (msg.payload.phase === "thinking") {
-        const existingIdx = findLastThinkingIndex(state.messages, source, { pendingOnly: true });
-        if (existingIdx < 0) {
-          return {
-            ...state,
-            phase: msg.payload.phase,
-            phaseDetail: msg.payload.detail ?? "",
-            activeStreamId: state.activeStreamId,
-            waitingForBot: false,
-            messages: [
-              ...state.messages,
-              createUiMessage("system", "", {
-                kind: "thinking",
-                source,
-                pending: true,
-              }),
-            ],
-          };
-        }
-      }
       if (msg.payload.phase !== "thinking") {
         // 当离开 thinking 阶段时，把所有 pending=true 的 thinking 消息改成 pending=false（即完成思考，折叠面板）
         let nextMsgs = state.messages.map(m => {
@@ -657,6 +701,14 @@ function handleServerMessage(
         // 如果阶段发生了改变（例如从 thinking 变成 ready/coding 等），也将还在 streaming 的文本块封口
         nextMsgs = closeStreamingForSource(nextMsgs, source);
 
+        // 过滤掉空内容且已关闭的 thinking 气泡（残留清理）
+        nextMsgs = nextMsgs.filter(m => {
+          if (m.role === "system" && m.metadata?.kind === "thinking" && !m.metadata?.pending && isThinkingPlaceholderContent(m.content)) {
+            return false;
+          }
+          return true;
+        });
+
         return {
           ...state,
           phase: msg.payload.phase,
@@ -668,6 +720,7 @@ function handleServerMessage(
       }
 
       // 如果进入了 thinking 阶段，也给先前的文本流封口
+      // 不再无条件创建空 thinking bubble（留给后续 agent.thinking 消息处理）
       const nextMsgs = closeStreamingForSource(state.messages, source);
 
       return {
@@ -1100,6 +1153,13 @@ function handleServerMessage(
       return {
         ...state,
         sessions: msg.payload.sessions,
+      };
+    }
+    // ── 多项目历史会话列表 ──
+    case "session.list_multi_result": {
+      return {
+        ...state,
+        multiSessions: msg.payload.projects || {},
       };
     }
     // ── 会话删除结果 ──

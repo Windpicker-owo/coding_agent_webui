@@ -2,12 +2,14 @@
  *
  * 通过 WebSocket browse.directory 消息浏览服务器端文件系统。
  * 确认后通过 onSelect 回调返回选中的路径。
+ * Windows 下支持驱动盘选择。
  */
 
 import { useState, useEffect, useCallback } from "react";
 import { getWSClient } from "../../utils/ws-client.ts";
+import { normalizePath } from "../../utils/path-utils.ts";
 import type { BrowseDirectoryResultPayload } from "../../types/messages";
-import { Folder, ChevronRight, Home } from "lucide-react";
+import { Folder, ChevronRight, Home, HardDrive } from "lucide-react";
 
 interface DirectoryEntry {
   name: string;
@@ -21,6 +23,16 @@ interface DirectoryPickerProps {
   onSelect: (path: string) => void;
   /** 取消回调 */
   onCancel: () => void;
+}
+
+/** 判断当前是否处于 Windows 根目录（驱动盘列表）视图 */
+function isWindowsRootView(path: string): boolean {
+  return path === "根目录" || path === "" || path === "/";
+}
+
+/** 判断 entry name 是否像 Windows 驱动盘 (e.g. "C:\\") */
+function isDriveEntry(name: string): boolean {
+  return /^[A-Z]:\\?$/.test(name);
 }
 
 export function DirectoryPicker({
@@ -74,8 +86,13 @@ export function DirectoryPicker({
   /** 点击目录进入 */
   const handleEnterDir = useCallback(
     (entryName: string) => {
-      const sep = currentPath.endsWith("/") ? "" : "/";
-      browsePath(currentPath + sep + entryName);
+      // Windows 根目录视图：点击驱动盘直接进入该盘
+      if (isWindowsRootView(currentPath) && isDriveEntry(entryName)) {
+        browsePath(entryName);
+        return;
+      }
+      const sep = currentPath.endsWith("/") || currentPath.endsWith("\\") ? "" : "\\";
+      browsePath(normalizePath(currentPath + sep + entryName));
     },
     [currentPath, browsePath]
   );
@@ -89,8 +106,12 @@ export function DirectoryPicker({
 
   /** 确认选择当前目录 */
   const handleConfirm = useCallback(() => {
-    onSelect(currentPath);
+    // Windows 根目录视图不允许直接确认
+    if (isWindowsRootView(currentPath)) return;
+    onSelect(normalizePath(currentPath));
   }, [currentPath, onSelect]);
+
+  const atRoot = isWindowsRootView(currentPath);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
@@ -113,9 +134,9 @@ export function DirectoryPicker({
           <div className="flex items-center gap-2">
             <button
               onClick={() => browsePath("/")}
-              disabled={loading}
+              disabled={loading || atRoot}
               className="p-1 text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 disabled:opacity-40"
-              title="根目录"
+              title="根目录（驱动盘列表）"
             >
               <Home size={16} />
             </button>
@@ -130,7 +151,7 @@ export function DirectoryPicker({
               className="flex-1 text-xs text-gray-500 dark:text-gray-400 font-mono truncate select-all"
               title={currentPath}
             >
-              {currentPath}
+              {atRoot ? "💻 选择驱动盘..." : currentPath}
             </span>
           </div>
         </div>
@@ -158,39 +179,53 @@ export function DirectoryPicker({
           ) : (
             <div className="py-1">
               {entries.map((entry) => (
-                <button
+                <div
                   key={entry.name}
-                  onClick={() => {
-                    if (entry.is_dir) {
-                      handleEnterDir(entry.name);
-                    }
-                  }}
-                  disabled={!entry.is_dir}
-                  className={`w-full flex items-center gap-3 px-5 py-2 text-sm transition-colors text-left ${
+                  className={`group w-full flex items-center justify-between px-5 py-2 text-sm transition-colors ${
                     entry.is_dir
-                      ? "hover:bg-blue-50 dark:hover:bg-blue-900/20 text-gray-700 dark:text-gray-300 cursor-pointer"
-                      : "text-gray-400 dark:text-gray-600 cursor-default"
+                      ? "hover:bg-blue-50 dark:hover:bg-blue-900/20 text-gray-700 dark:text-gray-300"
+                      : "text-gray-400 dark:text-gray-600"
                   }`}
                 >
-                  {entry.is_dir ? (
-                    <Folder
-                      size={16}
-                      className="text-amber-500 shrink-0"
-                    />
-                  ) : (
-                    <ChevronRight
-                      size={16}
-                      className="text-gray-300 dark:text-gray-700 shrink-0"
-                    />
-                  )}
-                  <span className="truncate">{entry.name}</span>
+                  <div 
+                    className={`flex-1 flex items-center gap-3 overflow-hidden ${entry.is_dir ? "cursor-pointer" : "cursor-default"}`}
+                    onClick={() => {
+                      if (entry.is_dir) {
+                        handleEnterDir(entry.name);
+                      }
+                    }}
+                  >
+                    {entry.is_dir ? (
+                      isWindowsRootView(currentPath) && isDriveEntry(entry.name) ? (
+                        <HardDrive size={16} className="text-blue-500 shrink-0" />
+                      ) : (
+                        <Folder size={16} className="text-amber-500 shrink-0" />
+                      )
+                    ) : (
+                      <ChevronRight size={16} className="text-gray-300 dark:text-gray-700 shrink-0" />
+                    )}
+                    <span className="truncate">{entry.name}</span>
+                  </div>
+                  
                   {entry.is_dir && (
-                    <ChevronRight
-                      size={14}
-                      className="ml-auto text-gray-300 dark:text-gray-600 shrink-0"
-                    />
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        let targetPath = "";
+                        if (isWindowsRootView(currentPath) && isDriveEntry(entry.name)) {
+                          targetPath = entry.name;
+                        } else {
+                          const sep = currentPath.endsWith("/") || currentPath.endsWith("\\") ? "" : "\\";
+                          targetPath = normalizePath(currentPath + sep + entry.name);
+                        }
+                        onSelect(targetPath);
+                      }}
+                      className="ml-3 px-2.5 py-1 text-xs font-medium text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/30 rounded opacity-0 group-hover:opacity-100 transition-opacity hover:bg-blue-200 dark:hover:bg-blue-800/50 shrink-0"
+                    >
+                      选择
+                    </button>
                   )}
-                </button>
+                </div>
               ))}
             </div>
           )}
@@ -207,10 +242,10 @@ export function DirectoryPicker({
           <div className="flex-1" />
           <button
             onClick={handleConfirm}
-            disabled={loading || !!error}
+            disabled={loading || !!error || atRoot}
             className="px-4 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed text-white rounded-lg transition-colors font-medium"
           >
-            选择此目录
+            {atRoot ? "请选择一个目录" : "选择此目录"}
           </button>
         </div>
       </div>
