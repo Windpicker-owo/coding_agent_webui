@@ -8,7 +8,7 @@ import { normalizePath } from "../../utils/path-utils";
 
 interface SessionListProps {
   onNewSession: () => void;
-  onOpenProject: () => void;
+  onOpenProject: (dir?: string) => void;
   collapsed: boolean;
   onToggle: () => void;
 }
@@ -217,7 +217,7 @@ export function SessionList({ onNewSession, onOpenProject, collapsed, onToggle }
           <Plus size={20} />
         </button>
         <button
-          onClick={onOpenProject}
+          onClick={() => onOpenProject()}
           className="p-2 text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors"
           title="打开项目"
         >
@@ -259,7 +259,7 @@ export function SessionList({ onNewSession, onOpenProject, collapsed, onToggle }
           新建会话
         </button>
         <button
-          onClick={onOpenProject}
+          onClick={() => onOpenProject()}
           className="flex items-center justify-center p-2 text-gray-500 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 dark:text-gray-400 rounded-xl transition-colors shrink-0"
           title="打开项目"
         >
@@ -329,15 +329,22 @@ export function SessionList({ onNewSession, onOpenProject, collapsed, onToggle }
               <div key={dir} className="mb-2">
                 <div className="group/dir flex w-full items-center rounded-lg transition-colors hover:bg-gray-50 dark:hover:bg-gray-900/50">
                   <button
-                    onClick={() => toggleDir(dir)}
+                    onClick={() => onOpenProject(dir)}
                     className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-3 py-2"
+                    title={`在 "${name}" 新建会话`}
                   >
                     <Folder size={14} className="text-gray-400 shrink-0" />
                     <span className="text-xs font-medium text-gray-700 dark:text-gray-300 flex-1 truncate text-left">{name}</span>
+                  </button>
+                  <button
+                    onClick={() => toggleDir(dir)}
+                    className="shrink-0 p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                    title={isExpanded ? "收起" : "展开"}
+                  >
                     {isExpanded ? (
-                      <ChevronDown size={12} className="text-gray-400 shrink-0" />
+                      <ChevronDown size={12} />
                     ) : (
-                      <ChevronRight size={12} className="text-gray-400 shrink-0" />
+                      <ChevronRight size={12} />
                     )}
                   </button>
                   <button

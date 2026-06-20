@@ -38,6 +38,7 @@ export class WSClient {
   private _reconnectCount = 0;
   private _maxReconnect = 5;
   private _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private _connectPromise: Promise<void> | null = null;
   private _listeners = new Set<(state: "open" | "closed" | "error") => void>();
   private _pingInterval: ReturnType<typeof setInterval> | null = null;
   private _lastPongTime = 0;
@@ -61,52 +62,8 @@ export class WSClient {
 
   /** 建立 WebSocket 连接 */
   connect(url: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      if (this._ws?.readyState === WebSocket.OPEN) {
-        resolve();
-        return;
-      }
-
-      this._url = url;
-      this._reconnectCount = 0;
-
-      try {
-        this._ws = new WebSocket(url);
-
-        this._ws.onopen = () => {
-          this._reconnectCount = 0;
-          this._lastPongTime = Date.now();
-          this._startHeartbeat();
-          this._notifyStateChange("open");
-          resolve();
-        };
-
-        this._ws.onmessage = (event: MessageEvent) => {
-          try {
-            const data = JSON.parse(event.data as string) as ServerMessage;
-            if (data.type === "pong") {
-              this._lastPongTime = Date.now();
-            }
-            this._dispatch(data);
-          } catch {
-            // JSON 解析失败 — 静默丢弃无效消息
-          }
-        };
-
-        this._ws.onerror = () => {
-          this._notifyStateChange("error");
-          reject(new Error("WebSocket connection error"));
-        };
-
-        this._ws.onclose = () => {
-          this._ws = null;
-          this._notifyStateChange("closed");
-          this._scheduleReconnect();
-        };
-      } catch (e) {
-        reject(e);
-      }
-    });
+    this._reconnectCount = 0;
+    return this._connect(url);
   }
 
   /** 断开连接 */
@@ -117,6 +74,7 @@ export class WSClient {
     }
     this._stopHeartbeat();
     this._reconnectCount = this._maxReconnect; // 阻止自动重连
+    this._connectPromise = null;
 
     if (this._ws) {
       const ws = this._ws;
@@ -188,6 +146,77 @@ export class WSClient {
 
   // ─── 内部方法 ──────────────────────────────────────────
 
+  private _connect(url: string): Promise<void> {
+    if (this._ws?.readyState === WebSocket.OPEN) {
+      return Promise.resolve();
+    }
+    if (this._ws?.readyState === WebSocket.CONNECTING && this._connectPromise) {
+      return this._connectPromise;
+    }
+
+    this._url = url;
+    let socket: WebSocket;
+    try {
+      socket = new WebSocket(url);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    this._ws = socket;
+
+    const promise = new Promise<void>((resolve, reject) => {
+      const settle = (callback: () => void) => {
+        if (this._connectPromise === promise) this._connectPromise = null;
+        callback();
+      };
+
+      socket.onopen = () => {
+        // 旧连接的延迟事件不能覆盖一个更新的有效连接。
+        if (this._ws !== socket) {
+          socket.close();
+          settle(() => reject(new Error("WebSocket connection was superseded")));
+          return;
+        }
+        this._reconnectCount = 0;
+        this._lastPongTime = Date.now();
+        this._startHeartbeat();
+        this._notifyStateChange("open");
+        settle(resolve);
+      };
+
+      socket.onmessage = (event: MessageEvent) => {
+        if (this._ws !== socket) return;
+        try {
+          const data = JSON.parse(event.data as string) as ServerMessage;
+          if (data.type === "pong") {
+            this._lastPongTime = Date.now();
+          }
+          this._dispatch(data);
+        } catch {
+          // JSON 解析失败 — 静默丢弃无效消息
+        }
+      };
+
+      socket.onerror = () => {
+        if (this._ws !== socket) return;
+        this._notifyStateChange("error");
+        settle(() => reject(new Error("WebSocket connection error")));
+      };
+
+      socket.onclose = () => {
+        // 新连接可能已在旧连接关闭前建立，不能被旧 onclose 清空。
+        if (this._ws !== socket) return;
+        this._ws = null;
+        this._stopHeartbeat();
+        this._connectPromise = null;
+        this._notifyStateChange("closed");
+        this._scheduleReconnect();
+      };
+    });
+
+    this._connectPromise = promise;
+    return promise;
+  }
+
   private _startHeartbeat(): void {
     this._stopHeartbeat();
     this._lastPongTime = Date.now();
@@ -247,7 +276,7 @@ export class WSClient {
   }
 
   private _scheduleReconnect(): void {
-    if (this._reconnectCount >= this._maxReconnect) {
+    if (this._reconnectCount >= this._maxReconnect || this._reconnectTimer) {
       return;
     }
 
@@ -257,7 +286,7 @@ export class WSClient {
     this._reconnectTimer = setTimeout(() => {
       if (!this._url) return;
       this._reconnectTimer = null;
-      this.connect(this._url).catch(() => {
+      this._connect(this._url).catch(() => {
         // 连接失败 — onclose 会再次触发重连调度
       });
     }, delay);

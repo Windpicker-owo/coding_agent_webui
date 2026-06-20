@@ -322,6 +322,31 @@ function summarizeFileChanges(changes: MessageBubbleProps["msg"][]) {
   return files;
 }
 
+function FoxCompletionMark() {
+  return (
+    <span className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-orange-50 ring-1 ring-orange-200/80 dark:bg-orange-950/40 dark:ring-orange-800/70">
+      <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" aria-hidden="true">
+        <path
+          d="M5.2 6.1 8.6 8c1-.7 2.2-1.1 3.4-1.1S14.4 7.3 15.4 8l3.4-1.9-.7 6.1c-.3 3.4-2.9 5.8-6.1 5.8s-5.8-2.4-6.1-5.8l-.7-6.1Z"
+          fill="currentColor"
+          className="text-orange-400 dark:text-orange-500"
+        />
+        <path
+          d="M8.1 12.4c.8.2 1.8.8 2.5 1.7L12 16l1.4-1.9c.7-.9 1.7-1.5 2.5-1.7-.5 2.5-1.9 4-3.9 4s-3.4-1.5-3.9-4Z"
+          fill="white"
+          fillOpacity=".92"
+        />
+        <circle cx="9.4" cy="11.3" r=".75" fill="#7c2d12" />
+        <circle cx="14.6" cy="11.3" r=".75" fill="#7c2d12" />
+        <path d="m10.9 14.6 1.1.8 1.1-.8" fill="none" stroke="#7c2d12" strokeWidth=".8" strokeLinecap="round" />
+      </svg>
+      <span className="absolute -bottom-0.5 -right-0.5 flex h-2.5 w-2.5 items-center justify-center rounded-full bg-emerald-500 text-white ring-2 ring-white dark:ring-gray-900">
+        <Check size={7} strokeWidth={3} />
+      </span>
+    </span>
+  );
+}
+
 
 function MessageBubbleComponent({ msg, view, inCompletedFold = false }: MessageBubbleProps) {
   const { phase, avatarUrl, ideMode, desktopMode } = view;
@@ -385,10 +410,13 @@ function MessageBubbleComponent({ msg, view, inCompletedFold = false }: MessageB
     return (
       <div className="w-full my-6 animate-slide-up-fade">
         <details className="group">
-          <summary className="relative z-0 list-none cursor-pointer select-none inline-flex items-center gap-2 px-3.5 py-1.5 bg-gray-50 hover:bg-gray-100 dark:bg-gray-800/50 dark:hover:bg-gray-800 rounded-full border border-gray-200 dark:border-gray-700/50 text-[13px] text-gray-600 dark:text-gray-400 transition-all before:absolute before:-top-[7px] before:left-4 before:-z-10 before:h-[18px] before:w-[18px] before:rotate-[25deg] before:skew-x-[10deg] before:skew-y-[10deg] before:rounded-tl-[3px] before:border-l before:border-t before:border-gray-200 before:bg-gray-50 before:transition-colors hover:before:bg-gray-100 dark:before:border-gray-700/50 dark:before:bg-gray-800/50 dark:hover:before:bg-gray-800 after:absolute after:-top-[7px] after:right-4 after:-z-10 after:h-[18px] after:w-[18px] after:-rotate-[25deg] after:-skew-x-[10deg] after:-skew-y-[10deg] after:rounded-tr-[3px] after:border-r after:border-t after:border-gray-200 after:bg-gray-50 after:transition-colors hover:after:bg-gray-100 dark:after:border-gray-700/50 dark:after:bg-gray-800/50 dark:hover:after:bg-gray-800">
-            <Check size={14} className="text-green-500" />
-            <span className="font-medium">已处理 {durationMs > 1000 ? durationStr : ""}</span>
-            <ChevronRight size={14} className="text-gray-400 group-open:rotate-90 transition-transform ml-1" />
+          <summary className="list-none inline-flex cursor-pointer select-none items-center gap-2 rounded-full border border-orange-200/70 bg-gradient-to-r from-white via-orange-50/60 to-white py-1.5 pl-1.5 pr-3 text-[13px] text-gray-600 shadow-sm outline-none transition-all hover:border-orange-300 hover:shadow-md focus-visible:border-orange-300 focus-visible:ring-2 focus-visible:ring-orange-200/60 dark:border-orange-900/60 dark:from-gray-900 dark:via-orange-950/25 dark:to-gray-900 dark:text-gray-300 dark:hover:border-orange-800 dark:focus-visible:border-orange-700 dark:focus-visible:ring-orange-900/50">
+            <FoxCompletionMark />
+            <span className="font-medium">已处理</span>
+            {durationMs > 1000 && (
+              <span className="tabular-nums text-gray-400 dark:text-gray-500">{durationStr}</span>
+            )}
+            <ChevronRight size={13} className="ml-0.5 text-gray-400 transition-transform group-open:rotate-90" />
           </summary>
           <div className="mt-4 pl-4 ml-3 border-l-2 border-gray-100 dark:border-gray-800/60 space-y-2">
             {activities.map(act => (
@@ -445,13 +473,14 @@ function MessageBubbleComponent({ msg, view, inCompletedFold = false }: MessageB
     const args = msg.metadata?.args as Record<string, unknown> | undefined;
     const argsSummary = msg.metadata?.args_summary as string | undefined;
     const reason = msg.metadata?.reason as string | undefined;
-    const stage = (msg.metadata?.stage as string | undefined) ?? "running";
+    const stage = msg.metadata?.stage as string | undefined;
     const outputs = Array.isArray(msg.metadata?.outputs)
       ? (msg.metadata?.outputs as ToolOutputMessage[])
       : [];
 
-    const isAgentActive = phase === "coding" || phase === "researching";
-    const effectiveStage = stage === "completed" || outputs.length > 0 || !isAgentActive ? "completed" : "running";
+    // 工具状态只能由该条消息自身决定，不能跟随全局 phase。
+    // 历史消息通常没有 stage；它们应保持完成态，而不是在新任务开始时重新转圈。
+    const effectiveStage = stage === "running" && outputs.length === 0 ? "running" : "completed";
 
     // --- 特殊处理 enter_phase 工具调用 ---
     const normalizedNameForCheck = toolName.toLowerCase();
@@ -656,9 +685,9 @@ function MessageBubbleComponent({ msg, view, inCompletedFold = false }: MessageB
               ? `CONSOLE ${stream.toUpperCase()}`
               : `RESULT ${outputToolName}`;
             return (
-              <details key={output.id || `${msg.id}-output-${index}`} className="group/output" open={exitCode !== 0}>
-                <summary className="flex items-center gap-2 mb-1.5 cursor-pointer list-none select-none">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-gray-500 flex items-center gap-1 group-hover/output:text-gray-700 dark:group-hover/output:text-gray-300 transition-colors">
+              <details key={output.id || `${msg.id}-output-${index}`} className="group/output overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-[#111113]" open={exitCode !== 0}>
+                <summary className="flex min-h-9 cursor-pointer list-none select-none items-center gap-2 bg-gray-50 px-3 py-2 transition-colors hover:bg-gray-100 dark:bg-[#18181b] dark:hover:bg-[#202024]">
+                  <span className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-gray-500 transition-colors group-hover/output:text-gray-700 dark:text-gray-400 dark:group-hover/output:text-gray-200">
                     <ChevronRight size={12} className="group-open/output:rotate-90 transition-transform" />
                     <Terminal size={12} /> {title}
                   </span>
@@ -672,7 +701,7 @@ function MessageBubbleComponent({ msg, view, inCompletedFold = false }: MessageB
                     </span>
                   )}
                 </summary>
-                <pre className="p-3 bg-[#1e1e1e] dark:bg-[#0d1117] rounded-lg text-[13px] text-gray-300 overflow-x-auto font-mono whitespace-pre-wrap max-h-96 overflow-y-auto shadow-inner border border-gray-800 ml-4">
+                <pre className="m-0 max-h-96 overflow-x-auto overflow-y-auto whitespace-pre-wrap border-t border-gray-800 bg-[#1e1e1e] p-3 font-mono text-[13px] leading-relaxed text-gray-300 dark:border-gray-800 dark:bg-[#09090b] dark:text-gray-200">
                   {parseAnsiToReact(output.content)}
                 </pre>
               </details>
@@ -714,23 +743,28 @@ function MessageBubbleComponent({ msg, view, inCompletedFold = false }: MessageB
     const stream = (msg.metadata?.stream as string | undefined) ?? "stdout";
     return (
       <div className={`mb-4 animate-slide-up-fade ${ideMode ? "w-full" : "w-full sm:max-w-3xl sm:ml-12"}`}>
-        <div className="flex items-center gap-2 mb-1">
-          <span className="text-xs px-1.5 py-0.5 bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded font-mono">
-            CONSOLE {stream.toUpperCase()}
-          </span>
-          {exitCode !== undefined && (
-            <span
-              className={`text-xs font-mono ${
-                exitCode === 0 ? "text-green-400" : "text-red-400"
-              }`}
-            >
-              exit: {exitCode}
+        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-[#111113] dark:shadow-black/20">
+          <div className="flex min-h-9 items-center gap-2 bg-gray-50 px-3 py-2 dark:bg-[#18181b]">
+            <span className="inline-flex items-center gap-1.5 font-mono text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+              <Terminal size={12} />
+              Console {stream.toUpperCase()}
             </span>
-          )}
+            {exitCode !== undefined && (
+              <span
+                className={`rounded-md px-1.5 py-0.5 font-mono text-[11px] ${
+                  exitCode === 0
+                    ? "bg-green-100 text-green-700 dark:bg-green-950/70 dark:text-green-400"
+                    : "bg-red-100 text-red-700 dark:bg-red-950/70 dark:text-red-400"
+                }`}
+              >
+                exit: {exitCode}
+              </span>
+            )}
+          </div>
+          <pre className="m-0 max-h-96 overflow-x-auto overflow-y-auto whitespace-pre-wrap border-t border-gray-800 bg-[#1e1e1e] p-3 font-mono text-xs leading-relaxed text-gray-300 dark:border-gray-800 dark:bg-[#09090b] dark:text-gray-200">
+            {parseAnsiToReact(msg.content)}
+          </pre>
         </div>
-        <pre className="p-3 bg-gray-950 rounded text-xs text-gray-300 overflow-x-auto font-mono whitespace-pre-wrap max-h-96 overflow-y-auto">
-          {msg.content}
-        </pre>
       </div>
     );
   }
@@ -740,21 +774,23 @@ function MessageBubbleComponent({ msg, view, inCompletedFold = false }: MessageB
     const toolName = normalizeToolName(rawToolName) || rawToolName;
     return (
       <div className={`mb-4 animate-slide-up-fade ${ideMode ? "w-full" : "w-full sm:max-w-3xl sm:ml-12"}`}>
-        <div className="flex items-center gap-2 mb-1">
-          <span className="text-xs px-1.5 py-0.5 bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-300 rounded font-mono">
-            RESULT {toolName}
-          </span>
+        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-[#111113] dark:shadow-black/20">
+          <div className="flex min-h-9 items-center gap-2 bg-gray-50 px-3 py-2 dark:bg-[#18181b]">
+            <span className="inline-flex items-center gap-1.5 font-mono text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+              <Terminal size={12} />
+              Result {toolName}
+            </span>
+          </div>
+          <pre className="m-0 max-h-96 overflow-x-auto overflow-y-auto whitespace-pre-wrap border-t border-gray-800 bg-[#1e1e1e] p-3 font-mono text-xs leading-relaxed text-gray-300 dark:border-gray-800 dark:bg-[#09090b] dark:text-gray-200">
+            {parseAnsiToReact(msg.content)}
+          </pre>
         </div>
-        <pre className="p-3 bg-gray-950 rounded text-xs text-gray-300 overflow-x-auto font-mono whitespace-pre-wrap max-h-96 overflow-y-auto">
-          {msg.content}
-        </pre>
       </div>
     );
   }
 
   if (kind === "file_change_summary") {
     const changes = (msg.metadata?.changes as MessageBubbleProps["msg"][] | undefined) ?? [];
-    const compact = Boolean(msg.metadata?.compact);
     const files = summarizeFileChanges(changes);
     const totals = Array.from(files.values()).reduce(
       (sum, stats) => ({ added: sum.added + stats.added, removed: sum.removed + stats.removed }),
@@ -795,25 +831,6 @@ function MessageBubbleComponent({ msg, view, inCompletedFold = false }: MessageB
         </span>
       </button>
     ));
-
-    if (compact) {
-      return (
-        <details className="group my-2 w-full">
-          <summary className="list-none inline-flex cursor-pointer select-none items-center gap-2 rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-[12px] text-gray-500 transition-colors hover:bg-gray-100 dark:border-gray-700/60 dark:bg-gray-800/50 dark:text-gray-400 dark:hover:bg-gray-800">
-            <Loader2 size={12} className="animate-spin text-blue-500" />
-            <span>已编辑 {files.size} 个文件</span>
-            <span className="flex items-center gap-1.5 font-mono text-[10px]">
-              <span className="text-green-600 dark:text-green-400">+{totals.added}</span>
-              <span className="text-red-600 dark:text-red-400">-{totals.removed}</span>
-            </span>
-            <ChevronRight size={12} className="transition-transform group-open:rotate-90" />
-          </summary>
-          <div className="mt-2 overflow-hidden rounded-lg border border-gray-200 bg-white divide-y divide-gray-100 dark:border-gray-800 dark:bg-gray-900/40 dark:divide-gray-800">
-            {fileRows}
-          </div>
-        </details>
-      );
-    }
 
     return (
       <details className="group w-full my-4 overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900/40 animate-slide-up-fade shadow-sm">
@@ -1264,7 +1281,7 @@ function MessageBubbleComponent({ msg, view, inCompletedFold = false }: MessageB
                   });
                   dispatch({ type: "SET_RECALL_CONTENT", payload: msg.content });
                 }}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-gray-200 bg-white text-xs text-gray-600 hover:text-gray-900 hover:border-gray-300 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:text-white dark:hover:border-gray-600 transition-colors"
+                className="message-action-button"
                 title="撤回这条消息并回滚之后的修改"
               >
                 <Undo2 size={12} />
@@ -1278,7 +1295,7 @@ function MessageBubbleComponent({ msg, view, inCompletedFold = false }: MessageB
                     anchor_message_id: msg.id,
                   })
                 }
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-gray-200 bg-white text-xs text-gray-600 hover:text-gray-900 hover:border-gray-300 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:text-white dark:hover:border-gray-600 transition-colors"
+                className="message-action-button"
                 title="从这条回复分叉出一个新会话"
               >
                 <GitFork size={12} />
@@ -1325,7 +1342,6 @@ function messageRenderEqual(
   }
 
   if (previousKind === "file_change_summary") {
-    if (previous.metadata?.compact !== next.metadata?.compact) return false;
     const previousChanges = (previous.metadata?.changes as MessageBubbleProps["msg"][] | undefined) ?? [];
     const nextChanges = (next.metadata?.changes as MessageBubbleProps["msg"][] | undefined) ?? [];
     return previousChanges.length === nextChanges.length &&

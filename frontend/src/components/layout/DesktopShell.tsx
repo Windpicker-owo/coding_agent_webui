@@ -31,10 +31,26 @@ export function DesktopShell() {
     dispatch({ type: "RESET_SESSION" });
   }, [dispatch]);
 
-  const handleOpenProjectClick = useCallback(() => {
-    setNewWorkDir(state.lastWorkDir || ".");
-    setShowOpenProjectDialog(true);
-  }, [state.lastWorkDir]);
+  const handleOpenProjectClick = useCallback((dir?: string) => {
+    if (dir) {
+      // 直接在指定目录新建会话
+      const workingDirectory = dir.trim();
+      if (!workingDirectory) return;
+      try {
+        dispatch({ type: "SET_CONNECTION", payload: "reconnecting" });
+        dispatch({ type: "RESET_SESSION" });
+        dispatch({ type: "SET_LAST_WORK_DIR", payload: workingDirectory });
+        dispatch({ type: "SET_LAST_SESSION_ID", payload: "" });
+        dispatch({ type: "ADD_RECENT_PROJECT", payload: workingDirectory });
+        getWSClient().send("project.open", { working_directory: workingDirectory });
+      } catch {
+        dispatch({ type: "SET_CONNECTION", payload: "open" });
+      }
+    } else {
+      setNewWorkDir(state.lastWorkDir || ".");
+      setShowOpenProjectDialog(true);
+    }
+  }, [state.lastWorkDir, dispatch]);
 
   const handleOpenProject = useCallback(() => {
     const workingDirectory = newWorkDir.trim();

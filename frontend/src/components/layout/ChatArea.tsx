@@ -1,5 +1,5 @@
 /** 聊天区域 */
-import { useRef, useEffect, useState, useCallback, useMemo } from "react";
+import { useRef, useEffect, useLayoutEffect, useState, useCallback, useMemo } from "react";
 import { useSession } from "../../hooks/useSession.ts";
 import type { UIMessage } from "../../types/messages.ts";
 import { MessageBubble, type MessageBubbleView } from "../chat/MessageBubble.tsx";
@@ -7,7 +7,8 @@ import { MessageInput } from "./MessageInput.tsx";
 import { isSameMessage, normalizeToolName } from "../../utils/message-utils.ts";
 import { ArrowDown, Loader2 } from "lucide-react";
 
-const SCROLL_THRESHOLD = 80;
+// 输入区悬浮在消息容器上方，正常追底时仍会保留约 100px 的可视缓冲。
+const SCROLL_THRESHOLD = 128;
 
 function isToolResultMessage(msg: UIMessage): boolean {
   const kind = msg.metadata?.kind;
@@ -168,15 +169,24 @@ function buildRenderableMessages(messages: UIMessage[], desktopMode: boolean, co
   }
 
   // 桌面模式下，文件变动始终汇总到本轮回复的末尾。
-  // 完成后再把其余过程消息折叠为“已处理”，正文和文件汇总保持独立且顺序稳定。
+  // 历史轮次始终保持折叠；只有当前仍在进行的轮次展开过程消息。
+  // 否则一发送新消息，waitingForBot 会让全部历史轮次瞬间展开并把视口顶到很前面。
   if (desktopMode) {
     const finalRenderable: UIMessage[] = [];
+    let lastUserIndex = -1;
+    for (let index = renderable.length - 1; index >= 0; index--) {
+      if (renderable[index].role === "user") {
+        lastUserIndex = index;
+        break;
+      }
+    }
     let i = 0;
     while (i < renderable.length) {
       if (renderable[i].role === "user") {
         finalRenderable.push(renderable[i]);
         i++;
       } else {
+        const blockStart = i;
         const block: UIMessage[] = [];
         while (i < renderable.length && renderable[i].role !== "user") {
           block.push(renderable[i]);
@@ -187,8 +197,9 @@ function buildRenderableMessages(messages: UIMessage[], desktopMode: boolean, co
 
         const fileChanges = block.filter(message => message.metadata?.kind === "file_change");
         const contentMessages = block.filter(message => message.metadata?.kind !== "file_change");
+        const collapseBlock = blockStart < lastUserIndex || collapseCompleted;
 
-        if (!collapseCompleted) {
+        if (!collapseBlock) {
           finalRenderable.push(...contentMessages);
         } else {
           let lastAgentIdx = -1;
@@ -228,7 +239,7 @@ function buildRenderableMessages(messages: UIMessage[], desktopMode: boolean, co
           }
         }
 
-        if (fileChanges.length > 0) {
+        if (collapseBlock && fileChanges.length > 0) {
           finalRenderable.push({
             id: `file-summary-${fileChanges[0].id}`,
             role: "system",
@@ -237,7 +248,6 @@ function buildRenderableMessages(messages: UIMessage[], desktopMode: boolean, co
             metadata: {
               kind: "file_change_summary",
               changes: fileChanges,
-              compact: !collapseCompleted,
             },
           });
         }
@@ -287,13 +297,31 @@ export function ChatArea() {
     setShowScrollButton(false);
   }, []);
 
-  // 滚动事件：控制"回到底部"按钮显隐
+  // 滚动事件只读取位置。是否暂停追底由明确的用户滚动意图决定，
+  // 避免内容增高或程序滚动触发 scroll 后误关自动跟随。
   const handleScroll = useCallback(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
-    const shouldAutoScroll = isNearBottom(container);
-    autoScrollEnabledRef.current = shouldAutoScroll;
-    setShowScrollButton(!shouldAutoScroll);
+    const nearBottom = isNearBottom(container);
+    if (nearBottom) autoScrollEnabledRef.current = true;
+    setShowScrollButton(!nearBottom);
+  }, []);
+
+  const handleWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+    if (event.deltaY < 0) autoScrollEnabledRef.current = false;
+  }, []);
+
+  const handleTouchMove = useCallback(() => {
+    autoScrollEnabledRef.current = false;
+  }, []);
+
+  const handlePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const bounds = container.getBoundingClientRect();
+    if (event.clientX >= bounds.right - 18) {
+      autoScrollEnabledRef.current = false;
+    }
   }, []);
 
   // 一键回到底部
@@ -303,8 +331,9 @@ export function ChatArea() {
   }, [stickToBottom]);
 
   // 切换会话后默认恢复为自动追底
-  useEffect(() => {
+  useLayoutEffect(() => {
     autoScrollEnabledRef.current = true;
+    stickToBottom();
     const frame = window.requestAnimationFrame(stickToBottom);
     return () => window.cancelAnimationFrame(frame);
   }, [sessionId, stickToBottom]);
@@ -328,7 +357,7 @@ export function ChatArea() {
       observer.disconnect();
       if (frame) window.cancelAnimationFrame(frame);
     };
-  }, [stickToBottom]);
+  }, [sessionId, stickToBottom]);
 
   if (connectionState === "reconnecting") {
     return (
@@ -398,6 +427,9 @@ export function ChatArea() {
       <div
         ref={scrollContainerRef}
         onScroll={handleScroll}
+        onWheel={handleWheel}
+        onTouchMove={handleTouchMove}
+        onPointerDown={handlePointerDown}
         className={`flex-1 min-h-0 overflow-y-auto px-4 pt-4 relative ${ideMode ? 'pb-40' : 'pb-[200px]'}`}
       >
         <div ref={contentRef} className={`${desktopMode || ideMode ? 'w-full' : 'max-w-4xl mx-auto'} space-y-6`}>

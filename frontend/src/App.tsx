@@ -16,7 +16,7 @@ function App() {
   const [desktopMode, setDesktopMode] = useState(false);
   const autoConnectStartedRef = useRef(false);
   const sessionBootstrapRef = useRef(false);
-  const hasEverConnectedRef = useRef(false);
+  const [hasEverConnected, setHasEverConnected] = useState(false);
 
   // 尽早 fetch /api/config 获取 desktop_mode（不依赖 WebSocket 连接）
   useEffect(() => {
@@ -70,7 +70,7 @@ function App() {
     const client = getWSClient();
     return client.onStateChange((nextState) => {
       if (nextState === "open") {
-        hasEverConnectedRef.current = true;
+        setHasEverConnected(true);
         dispatch({ type: "SET_CONNECTION", payload: "open" });
         setError("");
         return;
@@ -78,6 +78,12 @@ function App() {
       if (nextState === "closed") {
         dispatch({ type: "SET_CONNECTION", payload: "closed" });
         sessionBootstrapRef.current = false;
+        return;
+      }
+      if (nextState === "error" && !client.isConnected) {
+        // 某些 WebView 环境下 error 后的 close 事件可能延迟或缺失。
+        // 先进入 closed，让桌面端轮询重连链路立即接管。
+        dispatch({ type: "SET_CONNECTION", payload: "closed" });
       }
     });
   }, [dispatch]);
@@ -175,7 +181,7 @@ function App() {
           await handleConnect(data.url);
           return; // 成功则停止轮询
         }
-      } catch (e) {
+      } catch {
         if (!cancelled) {
           timer = window.setTimeout(tryConnect, 2000);
         }
@@ -251,7 +257,7 @@ function App() {
 
 
   // ── 连接界面 ──
-  if (!state.isConnected && state.connectionState !== "reconnecting" && !(desktopMode && hasEverConnectedRef.current)) {
+  if (!state.isConnected && state.connectionState !== "reconnecting" && !(desktopMode && hasEverConnected)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-white p-4 relative overflow-hidden">
         {/* Decorative Background Blobs */}

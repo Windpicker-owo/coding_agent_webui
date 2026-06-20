@@ -243,7 +243,14 @@ function sessionReducer(
       return {
         ...state,
         connectionState: action.payload,
-        isConnected: action.payload === "open",
+        // connecting/reconnecting 也可能只是项目或会话正在切换，底层 WebSocket
+        // 仍然连通。只在明确 open/closed 时更新物理连接状态，避免输入框误禁用。
+        isConnected:
+          action.payload === "open"
+            ? true
+            : action.payload === "closed"
+              ? false
+              : state.isConnected,
       };
 
     case "SET_WS_URL":
