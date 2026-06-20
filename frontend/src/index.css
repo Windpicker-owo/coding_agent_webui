@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 @import "highlight.js/styles/github-dark.css";
 @plugin "@tailwindcss/typography";
@@ -48,6 +48,9 @@
   --color-red-700: #b91c1c;
   --color-red-800: #991b1b;
   --color-red-900: #7f1d1d;
+  
+  --font-sans: 'Geist', 'Geist Sans', 'Noto Sans SC', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
 /* Light theme (default) */
@@ -82,7 +85,7 @@ body {
   padding: 0;
   width: 100%;
   height: 100%;
-  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
@@ -298,4 +301,26 @@ html {
 }
 .prose tbody tr:hover {
   background-color: var(--bg-tertiary);
+}
+
+/* 优化 Diff 浏览体验 */
+.hljs-deletion {
+  background-color: rgba(239, 68, 68, 0.2) !important;
+  color: #fca5a5 !important;
+  display: inline-block;
+  width: 100%;
+}
+.hljs-addition {
+  background-color: rgba(34, 197, 94, 0.2) !important;
+  color: #86efac !important;
+  display: inline-block;
+  width: 100%;
+}
+:not(.dark) .hljs-deletion {
+  background-color: rgba(239, 68, 68, 0.1) !important;
+  color: #b91c1c !important;
+}
+:not(.dark) .hljs-addition {
+  background-color: rgba(34, 197, 94, 0.1) !important;
+  color: #15803d !important;
 }

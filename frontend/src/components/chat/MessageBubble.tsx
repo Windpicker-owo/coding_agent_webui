@@ -375,9 +375,9 @@ export function MessageBubble({ msg, inCompletedFold = false }: MessageBubblePro
       : `${Math.floor(durationMs / 1000)}.${Math.floor((durationMs % 1000) / 100)}s`;
 
     return (
-      <div className="w-full my-6">
+      <div className="w-full my-6 animate-slide-up-fade">
         <details className="group">
-          <summary className="list-none cursor-pointer select-none inline-flex items-center gap-2 px-3 py-1.5 bg-gray-50 hover:bg-gray-100 dark:bg-gray-800/50 dark:hover:bg-gray-800 rounded-full border border-gray-200 dark:border-gray-700/50 text-[13px] text-gray-600 dark:text-gray-400 transition-all">
+          <summary className="relative z-0 list-none cursor-pointer select-none inline-flex items-center gap-2 px-3.5 py-1.5 bg-gray-50 hover:bg-gray-100 dark:bg-gray-800/50 dark:hover:bg-gray-800 rounded-full border border-gray-200 dark:border-gray-700/50 text-[13px] text-gray-600 dark:text-gray-400 transition-all before:absolute before:-top-[7px] before:left-4 before:-z-10 before:h-[18px] before:w-[18px] before:rotate-[25deg] before:skew-x-[10deg] before:skew-y-[10deg] before:rounded-tl-[3px] before:border-l before:border-t before:border-gray-200 before:bg-gray-50 before:transition-colors hover:before:bg-gray-100 dark:before:border-gray-700/50 dark:before:bg-gray-800/50 dark:hover:before:bg-gray-800 after:absolute after:-top-[7px] after:right-4 after:-z-10 after:h-[18px] after:w-[18px] after:-rotate-[25deg] after:-skew-x-[10deg] after:-skew-y-[10deg] after:rounded-tr-[3px] after:border-r after:border-t after:border-gray-200 after:bg-gray-50 after:transition-colors hover:after:bg-gray-100 dark:after:border-gray-700/50 dark:after:bg-gray-800/50 dark:hover:after:bg-gray-800">
             <Check size={14} className="text-green-500" />
             <span className="font-medium">已处理 {durationMs > 1000 ? durationStr : ""}</span>
             <ChevronRight size={14} className="text-gray-400 group-open:rotate-90 transition-transform ml-1" />
@@ -452,17 +452,17 @@ export function MessageBubble({ msg, inCompletedFold = false }: MessageBubblePro
       const rsn = reason || (args?.reason as string | undefined);
       
       return (
-        <div className={`my-4 flex justify-center animate-slide-up-fade ${inCompletedFold ? "-ml-7 w-[calc(100%+1.75rem)]" : "w-full"}`}>
+        <div className={`my-6 flex justify-center animate-slide-up-fade ${inCompletedFold ? "-ml-7 w-[calc(100%+1.75rem)]" : "w-full"}`}>
           <div className="flex flex-col items-center w-full max-w-2xl px-4">
-            <div className="flex items-center w-full gap-3">
-              <div className="h-px flex-1 bg-gray-200 dark:bg-gray-800"></div>
-              <div className="text-blue-600 dark:text-blue-400 font-medium text-[11px] tracking-wide whitespace-nowrap">
+            <div className="flex items-center w-full gap-4">
+              <div className="h-[1px] flex-1 bg-gradient-to-r from-transparent via-blue-200 to-blue-300 dark:via-blue-800 dark:to-blue-700"></div>
+              <div className="text-blue-600 dark:text-blue-400 font-bold text-xs sm:text-[13px] tracking-widest whitespace-nowrap px-4 py-1.5 rounded-full border border-blue-200/50 dark:border-blue-800/50 bg-blue-50/50 dark:bg-blue-900/20 shadow-sm">
                 进入阶段: {phaseName}
               </div>
-              <div className="h-px flex-1 bg-gray-200 dark:bg-gray-800"></div>
+              <div className="h-[1px] flex-1 bg-gradient-to-l from-transparent via-blue-200 to-blue-300 dark:via-blue-800 dark:to-blue-700"></div>
             </div>
             {rsn && (
-              <div className="mt-1.5 text-[10px] leading-relaxed text-gray-500 dark:text-gray-400 text-center max-w-lg">
+              <div className="mt-2 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400 text-center max-w-lg italic">
                 {rsn}
               </div>
             )}
@@ -755,7 +755,7 @@ export function MessageBubble({ msg, inCompletedFold = false }: MessageBubblePro
     if (files.size === 0) return null;
 
     return (
-      <section className="w-full my-4 overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900/40">
+      <section className="w-full my-4 overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900/40 animate-slide-up-fade shadow-sm">
         <div className="flex items-center justify-between gap-4 px-4 py-3 bg-gray-50/70 dark:bg-gray-900/70">
           <div className="flex min-w-0 items-center gap-3">
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-gray-500 shadow-sm ring-1 ring-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:ring-gray-700">
@@ -1172,13 +1172,16 @@ export function MessageBubble({ msg, inCompletedFold = false }: MessageBubblePro
       >
         {desktopMode && !isUser && (
           <div className="text-xs font-semibold mb-1 select-none flex items-center gap-1.5">
-            <span className={`${
-              source === "coder" 
-                ? "text-orange-500 dark:text-orange-400" 
-                : source === "solo"
-                  ? "text-cyan-500 dark:text-cyan-400"
-                  : "text-blue-500 dark:text-blue-400"
-            }`}>
+            <span 
+              className={`${
+                source === "coder" 
+                  ? "text-orange-500 dark:text-orange-400" 
+                  : source === "solo"
+                    ? "text-cyan-500 dark:text-cyan-400"
+                    : "text-blue-500 dark:text-blue-400"
+              }`}
+              style={{ fontFamily: "'Nunito', 'Comic Sans MS', 'Chalkboard SE', 'Marker Felt', sans-serif" }}
+            >
               {source === "coder" ? "Coder" : source === "solo" ? "SOLO" : "MoFox"}
             </span>
           </div>
