@@ -3,6 +3,7 @@ import { Loader2 } from "lucide-react";
 import { useSession, useSessionDispatch } from "./hooks/useSession.ts";
 import { getWSClient } from "./utils/ws-client.ts";
 import { AppShell } from "./components/layout/AppShell.tsx";
+import { DesktopShell } from "./components/layout/DesktopShell.tsx";
 import type { ServerMessage, UIConfig } from "./types/messages";
 
 function App() {
@@ -325,6 +326,9 @@ function App() {
   }
 
   // ── 主界面（含重连遮罩）──
+  if (state.desktopMode) {
+    return <DesktopShell onDisconnect={handleDisconnect} />;
+  }
   return <AppShell onDisconnect={handleDisconnect} />;
 }
 

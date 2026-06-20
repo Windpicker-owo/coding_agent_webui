@@ -4,7 +4,7 @@ import { useSession } from "../../hooks/useSession.ts";
 import type { UIMessage } from "../../types/messages.ts";
 import { MessageBubble } from "../chat/MessageBubble.tsx";
 import { MessageInput } from "./MessageInput.tsx";
-import { isSameMessage } from "../../utils/message-utils.ts";
+import { isSameMessage, normalizeToolName } from "../../utils/message-utils.ts";
 import { ArrowDown, Loader2 } from "lucide-react";
 
 const SCROLL_THRESHOLD = 80;
@@ -14,12 +14,95 @@ function isToolResultMessage(msg: UIMessage): boolean {
   return msg.role === "system" && (kind === "console_output" || kind === "tool_result");
 }
 
-function buildRenderableMessages(messages: UIMessage[]): UIMessage[] {
+function buildRenderableMessages(messages: UIMessage[], desktopMode: boolean, isBusy: boolean): UIMessage[] {
   const renderable: UIMessage[] = [];
   let currentToolGroup: UIMessage | null = null;
+  let currentActivityGroup: UIMessage | null = null;
+
+  const isIntermediate = (msg: UIMessage) => {
+    const kind = msg.metadata?.kind as string;
+    const rawToolName = msg.metadata?.tool_name as string | undefined;
+    const toolName = rawToolName ? normalizeToolName(rawToolName).toLowerCase() : "";
+    if (kind === "tool_call" && (toolName.includes("enter_phase") || toolName.includes("implement_plan"))) {
+      return false; // Don't fold phase transitions and plan creations
+    }
+    return msg.role === "system" && ["tool_call", "thinking", "checkpoint_created", "research_progress"].includes(kind);
+  };
 
   for (const message of messages) {
-    if (message.role === "system" && message.metadata?.kind === "tool_call") {
+    if (desktopMode && isIntermediate(message)) {
+      if (!currentActivityGroup) {
+        currentActivityGroup = {
+          id: `group-${message.id}`,
+          role: "system",
+          content: "",
+          timestamp: message.timestamp || Date.now(),
+          metadata: {
+            kind: "activity_group",
+            activities: [],
+            pending: false,
+          },
+        } as UIMessage;
+        renderable.push(currentActivityGroup);
+      }
+      const acts = currentActivityGroup.metadata!.activities as UIMessage[];
+      acts.push(message);
+      
+      // Update pending status of the group
+      const kind = message.metadata?.kind;
+      if (kind === "tool_call") {
+        if (message.metadata?.stage === "running") {
+          currentActivityGroup.metadata!.pending = true;
+        } else {
+          currentActivityGroup.metadata!.pending = false;
+        }
+      } else if (kind === "thinking") {
+        if (message.metadata?.pending) {
+          currentActivityGroup.metadata!.pending = true;
+        } else {
+          currentActivityGroup.metadata!.pending = false;
+        }
+      } else if (kind === "research_progress") {
+        if (message.metadata?.in_progress) {
+          currentActivityGroup.metadata!.pending = true;
+        } else {
+          currentActivityGroup.metadata!.pending = false;
+        }
+      }
+
+      continue;
+    }
+
+    if (desktopMode && isToolResultMessage(message)) {
+      if (currentActivityGroup) {
+        const acts = currentActivityGroup.metadata!.activities as UIMessage[];
+        const lastToolCall = [...acts].reverse().find(m => m.metadata?.kind === "tool_call");
+        if (lastToolCall) {
+          if (!lastToolCall.metadata) lastToolCall.metadata = {};
+          if (!lastToolCall.metadata.outputs) lastToolCall.metadata.outputs = [];
+          (lastToolCall.metadata.outputs as UIMessage[]).push(message);
+        } else {
+          acts.push(message);
+        }
+      } else {
+        renderable.push(message);
+      }
+      continue;
+    }
+
+    if (desktopMode) {
+      // Any independent message (user, agent, or standalone system message like enter_phase)
+      // should break the current activity group to maintain chronological order.
+      currentActivityGroup = null;
+      
+      const last = renderable[renderable.length - 1];
+      if (isSameMessage(last, message)) continue;
+      renderable.push(message);
+      continue;
+    }
+
+    // Web Mode (non-desktopMode) logic
+    if (!desktopMode && message.role === "system" && message.metadata?.kind === "tool_call") {
       currentToolGroup = {
         ...message,
         metadata: {
@@ -70,6 +153,76 @@ function buildRenderableMessages(messages: UIMessage[]): UIMessage[] {
     renderable.push(message);
   }
 
+  // --- Aggressive Folding Logic (Claude/Codex Style) ---
+  // When the agent is NOT busy, collapse all consecutive system/intermediate messages between user/agent messages
+  // into a single "aggressive_fold" group.
+  if (desktopMode && !isBusy) {
+    const finalRenderable: UIMessage[] = [];
+    let i = 0;
+    while (i < renderable.length) {
+      if (renderable[i].role === "user") {
+        finalRenderable.push(renderable[i]);
+        i++;
+      } else {
+        const block: UIMessage[] = [];
+        while (i < renderable.length && renderable[i].role !== "user") {
+          block.push(renderable[i]);
+          i++;
+        }
+        
+        if (block.length === 0) continue;
+
+        let lastAgentIdx = -1;
+        for (let j = block.length - 1; j >= 0; j--) {
+          if (block[j].role === "agent") {
+            lastAgentIdx = j;
+            break;
+          }
+        }
+
+        const group: UIMessage[] = [];
+        let lastAgentMsg: UIMessage | null = null;
+
+        if (lastAgentIdx !== -1) {
+          lastAgentMsg = block[lastAgentIdx];
+          for (let j = 0; j < block.length; j++) {
+            if (j !== lastAgentIdx) {
+              group.push(block[j]);
+            }
+          }
+        } else {
+          group.push(...block);
+        }
+
+        if (group.length > 0) {
+          let startTime = group[0].timestamp || Date.now();
+          let endTime = startTime;
+          for (const msg of group) {
+            const ts = msg.timestamp || Date.now();
+            if (ts < startTime) startTime = ts;
+            if (ts > endTime) endTime = ts;
+          }
+          finalRenderable.push({
+            id: `agg-fold-${group[0].id}`,
+            role: "system",
+            content: "",
+            timestamp: startTime,
+            metadata: {
+              kind: "aggressive_fold",
+              activities: group,
+              durationMs: endTime - startTime,
+            }
+          } as UIMessage);
+        }
+
+        if (lastAgentMsg) {
+          finalRenderable.push(lastAgentMsg);
+        }
+      }
+    }
+    return finalRenderable;
+  }
+
   return renderable;
 }
 
@@ -78,12 +231,13 @@ function isNearBottom(el: HTMLElement): boolean {
 }
 
 export function ChatArea() {
-  const { messages, sessionId, isConnected, waitingForBot, connectionState, avatarUrl, ideMode, lastWorkDir, projectName } = useSession();
+  const { messages, sessionId, isConnected, waitingForBot, connectionState, avatarUrl, ideMode, desktopMode, lastWorkDir, projectName, phase } = useSession();
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const autoScrollEnabledRef = useRef(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
-  const renderableMessages = buildRenderableMessages(messages);
+  const isBusy = phase !== "ready" && phase !== "init" && phase !== "error";
+  const renderableMessages = buildRenderableMessages(messages, desktopMode, isBusy);
 
   const stickToBottom = useCallback(() => {
     const container = scrollContainerRef.current;
@@ -201,7 +355,7 @@ export function ChatArea() {
         onScroll={handleScroll}
         className={`flex-1 min-h-0 overflow-y-auto px-4 pt-4 relative ${ideMode ? 'pb-40' : 'pb-[200px]'}`}
       >
-        <div ref={contentRef} className={`${ideMode ? 'w-full' : 'max-w-4xl mx-auto'} space-y-6`}>
+        <div ref={contentRef} className={`${desktopMode || ideMode ? 'w-full' : 'max-w-4xl mx-auto'} space-y-6`}>
           {renderableMessages.length === 0 ? (
             <div className="flex items-center justify-center py-10 text-gray-500 dark:text-gray-400">
               <p className="text-sm">会话已就绪，在下方输入消息开始对话。</p>
@@ -224,7 +378,7 @@ export function ChatArea() {
         </div>
       </div>
 
-      <div className={`absolute bottom-0 left-0 right-0 pointer-events-none ${ideMode ? 'bg-white dark:bg-gray-950 pt-2 pb-0 px-0 border-t border-gray-100 dark:border-gray-800' : 'bg-gradient-to-t from-white via-white to-transparent dark:from-gray-950 dark:via-gray-950 dark:to-transparent pt-12 pb-6 px-4'}`}>
+      <div className={`absolute bottom-0 left-0 right-0 pointer-events-none ${ideMode ? 'bg-white dark:bg-gray-950 pt-2 pb-0 px-0 border-t border-gray-100 dark:border-gray-800' : 'bg-gradient-to-t from-white via-white to-transparent dark:from-[#1e1e1e] dark:via-[#1e1e1e] dark:to-transparent pt-12 pb-6 px-4'}`}>
         <div className={`${ideMode ? 'w-full' : 'max-w-4xl mx-auto'} relative pointer-events-auto`}>
           {/* 回到底部浮动按钮 */}
           {showScrollButton && (

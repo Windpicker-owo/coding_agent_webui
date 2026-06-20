@@ -61,7 +61,7 @@ function getModeBadgeClasses(mode: "auto" | "yolo" | "goal" | "solo"): string {
   }
 }
 
-function getPhaseNoticeClasses(phase: string): string {
+export function getPhaseNoticeClasses(phase: string): string {
   switch (phase) {
     case "thinking":
       return "border-b border-amber-200 bg-amber-50/80 text-amber-900 dark:border-amber-900/30 dark:bg-amber-900/10 dark:text-amber-200";

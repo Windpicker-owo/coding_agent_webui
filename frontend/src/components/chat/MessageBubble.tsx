@@ -291,7 +291,7 @@ function getDiffStats(diff?: string): DiffStats | null {
 
 
 export function MessageBubble({ msg }: MessageBubbleProps) {
-  const { phase, avatarUrl, ideMode } = useSession();
+  const { phase, avatarUrl, ideMode, desktopMode } = useSession();
   const dispatch = useSessionDispatch();
   const kind = msg.metadata?.kind as string | undefined;
   const source = (msg.metadata?.source as string | undefined) ?? "agent";
@@ -340,6 +340,146 @@ export function MessageBubble({ msg }: MessageBubbleProps) {
     }
   }, [kind, msg.metadata, msg.id, dispatch]);
 
+  if (kind === "aggressive_fold") {
+    const activities = (msg.metadata?.activities as any[]) || [];
+    if (activities.length === 0) return null;
+
+    const durationMs = (msg.metadata?.durationMs as number) || 0;
+    const durationStr = durationMs > 60000 
+      ? `${Math.floor(durationMs / 60000)}m ${Math.floor((durationMs % 60000) / 1000)}s`
+      : `${Math.floor(durationMs / 1000)}.${Math.floor((durationMs % 1000) / 100)}s`;
+
+    // Extract file changes
+    const fileChanges = new Map<string, { added: number, removed: number }>();
+    const extractChanges = (acts: any[]) => {
+      acts.forEach(a => {
+        if (a.metadata?.kind === "tool_call") {
+          const tname = normalizeToolName(a.metadata?.tool_name || "").toLowerCase();
+          if (tname.includes("write") || tname.includes("replace") || tname.includes("edit") || tname.includes("create")) {
+            const args = a.metadata?.args as any;
+            if (args) {
+              const path = args.TargetFile || args.AbsolutePath || args.path || args.file_path;
+              if (path) {
+                const pathStr = path as string;
+                if (!fileChanges.has(pathStr)) {
+                  fileChanges.set(pathStr, { added: 0, removed: 0 });
+                }
+                const stats = fileChanges.get(pathStr)!;
+                
+                if ((tname.includes("write") || tname.includes("create")) && args.CodeContent) {
+                   stats.added += args.CodeContent.split('\n').length;
+                }
+
+                if (Array.isArray(a.metadata.outputs)) {
+                  a.metadata.outputs.forEach((out: any) => {
+                    if (out.content) {
+                      const lines = out.content.split('\n');
+                      let inDiff = false;
+                      for (const line of lines) {
+                        if (line.includes('[diff_block_start]')) inDiff = true;
+                        else if (line.includes('[diff_block_end]')) inDiff = false;
+                        else if (inDiff || (out.content.includes('---') && out.content.includes('+++'))) {
+                           if (line.startsWith('+') && !line.startsWith('+++')) stats.added++;
+                           if (line.startsWith('-') && !line.startsWith('---')) stats.removed++;
+                        }
+                      }
+                    }
+                  });
+                }
+              }
+            }
+          }
+        } else if (a.metadata?.kind === "activity_group" && a.metadata?.activities) {
+          extractChanges(a.metadata.activities);
+        }
+      });
+    };
+    extractChanges(activities);
+
+    return (
+      <div className="w-full my-6">
+        <details className="group animate-slide-up-fade">
+          <summary className="list-none cursor-pointer select-none inline-flex items-center gap-2 px-3 py-1.5 bg-gray-50 hover:bg-gray-100 dark:bg-gray-800/50 dark:hover:bg-gray-800 rounded-full border border-gray-200 dark:border-gray-700/50 text-[13px] text-gray-600 dark:text-gray-400 transition-all">
+            <Check size={14} className="text-green-500" />
+            <span className="font-medium">已处理 {durationMs > 1000 ? durationStr : ""}</span>
+            <ChevronRight size={14} className="text-gray-400 group-open:rotate-90 transition-transform ml-1" />
+          </summary>
+          <div className="mt-4 pl-4 ml-3 border-l-2 border-gray-100 dark:border-gray-800/60 space-y-2">
+            {activities.map(act => (
+              <MessageBubble key={act.id} msg={act} />
+            ))}
+          </div>
+        </details>
+        {fileChanges.size > 0 && (
+          <div className="mt-3 pl-4 animate-slide-up-fade" style={{ animationDelay: '100ms', animationFillMode: 'both' }}>
+            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">文件变动</div>
+            <div className="flex flex-col gap-1.5">
+              {Array.from(fileChanges.entries()).map(([f, stats]) => (
+                <a 
+                  key={f} 
+                  href={`file:///${f.replace(/\\/g, '/').replace(/^\/+/, '')}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center justify-between gap-3 text-[13px] text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800/40 border border-gray-200/50 dark:border-gray-700/50 px-3 py-1.5 rounded w-fit hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/30 dark:hover:border-blue-800/50 dark:hover:text-blue-400 transition-colors cursor-pointer group/file"
+                  title={`点击查看变动：${f}`}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <FileCode size={13} className="text-blue-500 group-hover/file:text-blue-600 dark:group-hover/file:text-blue-400 shrink-0" />
+                    <span className="font-mono truncate max-w-sm">{f.split(/[/\\]/).pop()}</span>
+                  </div>
+                  {(stats.added > 0 || stats.removed > 0) && (
+                    <div className="flex items-center gap-2 text-[11px] font-mono shrink-0 ml-4">
+                      {stats.added > 0 && <span className="text-green-600 dark:text-green-400">+{stats.added}</span>}
+                      {stats.removed > 0 && <span className="text-red-600 dark:text-red-400">-{stats.removed}</span>}
+                    </div>
+                  )}
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (kind === "activity_group") {
+    const activities = (msg.metadata?.activities as any[]) || [];
+    if (activities.length === 0) return null;
+
+    const counts = {
+      tools: activities.filter(a => a.metadata?.kind === "tool_call").length,
+      thoughts: activities.filter(a => a.metadata?.kind === "thinking").length,
+      checkpoints: activities.filter(a => a.metadata?.kind === "checkpoint_created").length,
+      research: activities.filter(a => a.metadata?.kind === "research_progress").length,
+    };
+    
+    let summaryText = "";
+    if (counts.tools) summaryText += `${counts.tools} 个工具调用 `;
+    if (counts.thoughts) summaryText += `${counts.thoughts} 次思考 `;
+    if (counts.checkpoints) summaryText += `${counts.checkpoints} 个检查点 `;
+    if (counts.research) summaryText += `${counts.research} 次研究 `;
+    
+    const pending = msg.metadata?.pending;
+    
+    return (
+      <details className="group animate-slide-up-fade mb-3 w-full">
+        <summary className="list-none cursor-pointer select-none inline-flex items-center gap-1.5 text-[13px] text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors">
+          {pending ? (
+            <Loader2 size={12} className="animate-spin text-blue-500" />
+          ) : (
+            <ChevronRight size={14} className="text-gray-400 group-open:rotate-90 transition-transform" />
+          )}
+          <span>{summaryText || "后台活动"}</span>
+        </summary>
+        <div className="mt-1.5 pl-3 ml-1.5 border-l-2 border-gray-100 dark:border-gray-800 space-y-1">
+          {activities.map(act => (
+            <MessageBubble key={act.id} msg={act} />
+          ))}
+        </div>
+      </details>
+    );
+  }
+
   // 工具调用折叠组
   if (kind === "tool_group" || kind === "tool_call") {
     const rawToolName = (msg.metadata?.tool_name as string) ?? "unknown";
@@ -362,18 +502,18 @@ export function MessageBubble({ msg }: MessageBubbleProps) {
       const rsn = reason || (args?.reason as string | undefined);
       
       return (
-        <div className={`my-8 flex justify-center w-full animate-slide-up-fade ${ideMode ? "" : "sm:max-w-3xl sm:pl-12"}`}>
+        <div className={`my-3 flex justify-center w-full animate-slide-up-fade ${ideMode ? "" : "sm:max-w-3xl sm:pl-12"}`}>
           <div className="flex flex-col items-center w-full max-w-lg">
-            <div className="flex items-center w-full gap-4">
+            <div className="flex items-center w-full gap-3">
               <div className="h-px flex-1 bg-gradient-to-r from-transparent to-blue-200 dark:to-blue-800"></div>
-              <div className="flex items-center gap-2 px-5 py-2 bg-blue-50/80 dark:bg-blue-900/30 border border-blue-200/60 dark:border-blue-800/60 rounded-full text-blue-700 dark:text-blue-400 font-semibold text-[13px] tracking-wide shadow-sm backdrop-blur-sm">
-                <Milestone size={16} className="text-blue-500 dark:text-blue-400" />
+              <div className="flex items-center gap-1.5 px-3 py-1 bg-blue-50/80 dark:bg-blue-900/30 border border-blue-200/60 dark:border-blue-800/60 rounded-full text-blue-700 dark:text-blue-400 font-medium text-[11px] tracking-wide shadow-sm backdrop-blur-sm">
+                <Milestone size={12} className="text-blue-500 dark:text-blue-400" />
                 进入阶段: {phaseName}
               </div>
               <div className="h-px flex-1 bg-gradient-to-l from-transparent to-blue-200 dark:to-blue-800"></div>
             </div>
             {rsn && (
-              <div className="mt-3 px-6 py-2 bg-white/60 dark:bg-gray-900/40 border border-gray-100 dark:border-gray-800 rounded-xl text-xs text-gray-500 dark:text-gray-400 text-center shadow-sm max-w-sm backdrop-blur-sm">
+              <div className="mt-1.5 px-4 py-1 bg-white/60 dark:bg-gray-900/40 border border-gray-100 dark:border-gray-800 rounded-lg text-[10px] text-gray-500 dark:text-gray-400 text-center shadow-sm max-w-xs backdrop-blur-sm">
                 {rsn}
               </div>
             )}
@@ -470,17 +610,20 @@ export function MessageBubble({ msg }: MessageBubbleProps) {
     }
 
     return (
-      <details className={`mb-4 group animate-slide-up-fade ${ideMode ? "w-full" : "w-full sm:max-w-3xl sm:ml-12"}`}>
-        <summary className="list-none cursor-pointer select-none inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-gray-50 hover:bg-gray-100 dark:bg-gray-800/50 dark:hover:bg-gray-800 transition-colors border border-gray-200 dark:border-gray-700/50 shadow-sm text-sm">
+      <details className={`group animate-slide-up-fade ${desktopMode ? "mb-1 w-full" : (ideMode ? "mb-4 w-full" : "mb-4 w-full sm:max-w-3xl sm:ml-12")}`}>
+        <summary className={desktopMode
+          ? "list-none cursor-pointer select-none inline-flex items-center gap-1.5 text-[12px] text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-colors"
+          : "list-none cursor-pointer select-none inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-gray-50 hover:bg-gray-100 dark:bg-gray-800/50 dark:hover:bg-gray-800 transition-colors border border-gray-200 dark:border-gray-700/50 shadow-sm text-sm"
+        }>
           {effectiveStage === "running" ? (
-            <Loader2 size={14} className="animate-spin text-blue-500" />
+            <Loader2 size={desktopMode ? 12 : 14} className="animate-spin text-blue-500" />
           ) : (
-            <Check size={14} className="text-green-500" />
+            <Check size={desktopMode ? 12 : 14} className="text-green-500" />
           )}
-          <span className="font-medium text-gray-700 dark:text-gray-300">
+          <span className={desktopMode ? "font-normal" : "font-medium text-gray-700 dark:text-gray-300"}>
             {effectiveStage === "running" ? isRunningStr : titleStr}
           </span>
-          <ChevronRight size={14} className="text-gray-400 group-open:rotate-90 transition-transform" />
+          {!desktopMode && <ChevronRight size={14} className="text-gray-400 group-open:rotate-90 transition-transform" />}
         </summary>
 
         <div className={`${ideMode ? 'mt-1 ml-2 p-2 space-y-2' : 'mt-2 ml-4 p-4 space-y-4'} bg-gray-50/80 dark:bg-gray-900/50 border border-gray-100 dark:border-gray-800 rounded-xl`}>
@@ -554,9 +697,10 @@ export function MessageBubble({ msg }: MessageBubbleProps) {
               ? `CONSOLE ${stream.toUpperCase()}`
               : `RESULT ${outputToolName}`;
             return (
-              <div key={output.id || `${msg.id}-output-${index}`}>
-                <div className="flex items-center gap-2 mb-1.5">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-gray-500 flex items-center gap-1">
+              <details key={output.id || `${msg.id}-output-${index}`} className="group/output" open={exitCode !== 0}>
+                <summary className="flex items-center gap-2 mb-1.5 cursor-pointer list-none select-none">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-gray-500 flex items-center gap-1 group-hover/output:text-gray-700 dark:group-hover/output:text-gray-300 transition-colors">
+                    <ChevronRight size={12} className="group-open/output:rotate-90 transition-transform" />
                     <Terminal size={12} /> {title}
                   </span>
                   {exitCode !== undefined && (
@@ -568,11 +712,11 @@ export function MessageBubble({ msg }: MessageBubbleProps) {
                       exit: {exitCode}
                     </span>
                   )}
-                </div>
-                <pre className="p-3 bg-[#1e1e1e] dark:bg-[#0d1117] rounded-lg text-[13px] text-gray-300 overflow-x-auto font-mono whitespace-pre-wrap max-h-96 overflow-y-auto shadow-inner border border-gray-800">
+                </summary>
+                <pre className="p-3 bg-[#1e1e1e] dark:bg-[#0d1117] rounded-lg text-[13px] text-gray-300 overflow-x-auto font-mono whitespace-pre-wrap max-h-96 overflow-y-auto shadow-inner border border-gray-800 ml-4">
                   {parseAnsiToReact(output.content)}
                 </pre>
-              </div>
+              </details>
             );
           })}
         </div>
@@ -590,8 +734,11 @@ export function MessageBubble({ msg }: MessageBubbleProps) {
         : `${(thinkingElapsed / 1000).toFixed(1)}s`
       : null;
     return (
-      <details className={`mb-4 group animate-slide-up-fade ${ideMode ? "w-full" : "w-full sm:max-w-3xl sm:ml-12"}`} open={pending}>
-        <summary className="text-xs text-gray-400 dark:text-gray-500 cursor-pointer hover:text-gray-600 dark:hover:text-gray-400 select-none flex items-center gap-2">
+      <details className={`group animate-slide-up-fade ${desktopMode ? "mb-1 w-full" : (ideMode ? "mb-4 w-full" : "mb-4 w-full sm:max-w-3xl sm:ml-12")}`} open={pending}>
+        <summary className={desktopMode
+          ? "list-none text-[12px] text-gray-400 dark:text-gray-500 cursor-pointer hover:text-gray-600 dark:hover:text-gray-400 select-none inline-flex items-center gap-1.5"
+          : "text-xs text-gray-400 dark:text-gray-500 cursor-pointer hover:text-gray-600 dark:hover:text-gray-400 select-none flex items-center gap-2"
+        }>
           {pending && <Loader2 size={12} className="animate-spin" />}
           <span>{pending ? "正在思考..." : `思考过程 (${elapsedStr ?? "刚刚"})`}</span>
         </summary>
@@ -761,6 +908,20 @@ export function MessageBubble({ msg }: MessageBubbleProps) {
       : Math.round((safeCompleted / safeTotal) * 100);
     const progressLabel = totalRaw > 0 ? `${Math.min(completedRaw, totalRaw)}/${totalRaw}` : "准备中";
 
+    if (desktopMode) {
+      return (
+        <div className="w-full flex items-center gap-2 mb-1 animate-slide-up-fade text-[12px] text-sky-600 dark:text-sky-500/80">
+          {inProgress ? (
+            <Loader2 size={12} className="animate-spin" />
+          ) : (
+            <CheckCircle2 size={12} />
+          )}
+          <span>{inProgress ? "项目研究中" : "研究完成"} {progressLabel}</span>
+          <span className="text-gray-400 dark:text-gray-500">- {currentModule || status || "准备开始项目侦察"} ({percent}%)</span>
+        </div>
+      );
+    }
+
     return (
       <div className={`mb-4 animate-slide-up-fade ${ideMode ? "w-full" : "w-full sm:max-w-3xl sm:ml-12"}`}>
         <div className="rounded-2xl border border-sky-200 bg-sky-50/90 dark:border-sky-900/40 dark:bg-sky-950/20 shadow-sm overflow-hidden">
@@ -858,6 +1019,25 @@ export function MessageBubble({ msg }: MessageBubbleProps) {
     const description = (msg.metadata?.description as string | undefined) ?? msg.content;
     const filesAffected = msg.metadata?.files_affected as number | undefined;
     const reversible = msg.metadata?.reversible !== false;
+    if (desktopMode) {
+      return (
+        <div className="w-full flex items-center gap-2 mb-1 animate-slide-up-fade text-[12px] text-amber-600 dark:text-amber-500/80">
+          <MapPin size={12} />
+          <span>检查点 {step ? `#${step}` : ""} {tool}</span>
+          <span className="text-gray-400 dark:text-gray-500">- {filesAffected ?? 0} 个文件</span>
+          {reversible && checkpointId && (
+            <button
+              onClick={() => getWSClient().send("checkpoint.rollback", { mode: "to", checkpoint_id: checkpointId })}
+              className="ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded text-amber-700 hover:bg-amber-100 dark:text-amber-400 dark:hover:bg-amber-900/30 transition-colors"
+              title="回滚到这个检查点"
+            >
+              <RotateCcw size={12} />
+              回滚
+            </button>
+          )}
+        </div>
+      );
+    }
     return (
       <div className="w-full flex justify-center mb-4 animate-slide-up-fade">
         <div className={`px-4 py-3 rounded-2xl border border-amber-200 bg-amber-50/90 dark:border-amber-900/40 dark:bg-amber-950/20 shadow-sm ${ideMode ? "w-full" : "w-full sm:max-w-2xl"}`}>
@@ -961,8 +1141,8 @@ export function MessageBubble({ msg }: MessageBubbleProps) {
   }
 
   return (
-    <div className={`flex w-full ${isUser ? "justify-end" : "justify-start"} animate-slide-up-fade ${ideMode ? 'mb-3' : 'mb-6'}`}>
-      {!isUser && (
+    <div className={`flex w-full ${desktopMode ? "justify-start" : (isUser ? "justify-end" : "justify-start")} animate-slide-up-fade ${desktopMode || ideMode ? 'mb-3' : 'mb-6'}`}>
+      {!isUser && !desktopMode && (
         <button
           onClick={() => window.dispatchEvent(new Event('open-avatar-upload'))}
           className={`w-8 h-8 rounded-xl ${agentAccent.avatarBg} flex items-center justify-center shadow-inner shrink-0 mr-4 mt-1 ${ideMode ? 'hidden' : 'hidden sm:flex'} overflow-hidden cursor-pointer hover:opacity-80 transition-opacity`}
@@ -973,9 +1153,22 @@ export function MessageBubble({ msg }: MessageBubbleProps) {
       )}
       
       <div
-        className={`${ideMode ? 'w-full' : 'max-w-[85%] sm:max-w-[75%]'} flex flex-col`}
+        className={`${desktopMode || ideMode ? 'w-full' : 'max-w-[85%] sm:max-w-[75%]'} flex flex-col ${desktopMode && isUser ? 'items-end' : ''}`}
       >
-        {!isUser && !isSystem && !ideMode && (
+        {desktopMode && !isUser && (
+          <div className="text-xs font-semibold mb-1 select-none flex items-center gap-1.5">
+            <span className={`${
+              source === "coder" 
+                ? "text-orange-500 dark:text-orange-400" 
+                : source === "solo"
+                  ? "text-cyan-500 dark:text-cyan-400"
+                  : "text-blue-500 dark:text-blue-400"
+            }`}>
+              {source === "coder" ? "Coder" : source === "solo" ? "SOLO" : "MoFox"}
+            </span>
+          </div>
+        )}
+        {!isUser && !isSystem && !ideMode && !desktopMode && (
           <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 ml-1 select-none flex items-center gap-1.5">
             {source === "coder" ? "Coder Agent" : source === "solo" ? "SOLO Agent" : "Main Agent"}
           </div>
@@ -983,16 +1176,12 @@ export function MessageBubble({ msg }: MessageBubbleProps) {
         <div
           className={`${
           isUser
-            ? `${ideMode ? 'px-3 py-2' : 'px-5 py-3.5'} rounded-2xl rounded-tr-sm text-white shadow-sm ${
-                isGuidance
-                  ? "bg-amber-500"
-                  : "bg-blue-600"
-              }`
-            : `prose ${ideMode ? 'prose-sm' : ''} dark:prose-invert max-w-none text-gray-900 dark:text-gray-100`
+            ? `${desktopMode ? 'px-4 py-2 max-w-[85%] inline-block text-left mt-0.5' : (ideMode ? 'px-3 py-2' : 'px-5 py-3.5')} rounded-2xl ${desktopMode ? 'rounded-tr-sm bg-gray-100 text-gray-900 dark:bg-[#2b2d31] dark:text-gray-100' : 'rounded-tr-sm text-white ' + (isGuidance ? "bg-amber-500" : "bg-blue-600")} shadow-sm`
+            : `prose ${desktopMode || ideMode ? 'prose-sm' : ''} dark:prose-invert max-w-none text-gray-900 dark:text-gray-100`
           }`}
         >
           {isUser || isSystem ? (
-            <div className={`${ideMode ? 'text-[13px]' : 'text-[15px]'} whitespace-pre-wrap break-words leading-relaxed`}>
+            <div className={`${desktopMode ? 'text-[14px]' : (ideMode ? 'text-[13px]' : 'text-[15px]')} whitespace-pre-wrap break-words leading-relaxed`}>
               {isUser && Array.isArray(msg.metadata?.images) && (msg.metadata!.images as string[]).length > 0 && (
                 <div className="flex gap-2 flex-wrap mb-2">
                   {(msg.metadata!.images as string[]).map((src, i) => (

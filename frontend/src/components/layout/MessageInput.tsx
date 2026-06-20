@@ -152,7 +152,7 @@ export function MessageInput() {
 
   return (
     <div className={state.ideMode ? "w-full" : "max-w-3xl mx-auto relative"}>
-      <div className={`flex flex-col bg-white dark:bg-gray-900 transition-all duration-200 ${state.ideMode ? 'border-none' : 'rounded-[1.5rem] border shadow-md'} ${disabled ? (state.ideMode ? 'opacity-70' : 'border-gray-200 dark:border-gray-800 opacity-70') : (state.ideMode ? 'focus-within:bg-gray-50 dark:focus-within:bg-gray-800/50' : 'border-gray-300 dark:border-gray-700 focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/10 focus-within:shadow-lg')}`}>
+      <div className={`flex flex-col bg-transparent transition-all duration-200 ${state.ideMode ? 'border-none' : 'rounded-[1.5rem] border shadow-md bg-white dark:bg-[#1e1e1e]'} ${disabled ? (state.ideMode ? 'opacity-70' : 'border-gray-200 dark:border-[#2b2b2b] opacity-70') : (state.ideMode ? '' : 'border-gray-300 dark:border-[#3b3b3b] focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/10 focus-within:shadow-lg')}`}>
         <div className={`flex ${state.ideMode ? 'px-3 pt-2' : 'px-4 pt-3'}`}>
           <textarea
             ref={textareaRef}
@@ -194,7 +194,7 @@ export function MessageInput() {
         )}
 
         {/* Action Bar */}
-        <div className={`flex items-center justify-between px-3 pt-1 mt-1 ${state.ideMode ? 'pb-3' : 'pb-2'}`}>
+        <div className={`flex items-center justify-between pt-1 mt-1 ${state.ideMode ? 'px-3 pb-3' : 'px-3 pb-2'}`}>
           <div className="flex items-center gap-1.5 flex-wrap">
             <label
               className="p-1.5 text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors cursor-pointer"
@@ -213,10 +213,9 @@ export function MessageInput() {
                 }}
               />
             </label>
+            
             <ModelSelector />
-            
             <div className="w-px h-4 bg-gray-200 dark:bg-gray-800 mx-1"></div>
-            
             <div className="hidden sm:flex items-center px-1">
               <ModeToggle
                 label="Auto"
@@ -227,7 +226,6 @@ export function MessageInput() {
                 }}
               />
             </div>
-            
             <div className="hidden sm:flex items-center px-1">
               <ModeToggle
                 label="YOLO"
@@ -239,7 +237,6 @@ export function MessageInput() {
                 }}
               />
             </div>
-
 
             <LinkProjectButton />
           </div>
