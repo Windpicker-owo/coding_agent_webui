@@ -5,7 +5,7 @@ import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import type { PluggableList } from "unified";
 import { Check, Loader2, ChevronRight, Terminal, FileCode, CheckCircle2, Copy, MapPin, RotateCcw, Undo2, GitFork } from "lucide-react";
-import { useSession, useSessionDispatch } from "../../hooks/useSession.ts";
+import { useSessionDispatch } from "../../hooks/useSession.ts";
 import { getWSClient } from "../../utils/ws-client.ts";
 import { normalizeToolName } from "../../utils/message-utils.ts";
 import type { ContentPreviewInfo } from "../../types/messages";
@@ -18,8 +18,16 @@ interface ToolOutputMessage {
   metadata?: Record<string, unknown>;
 }
 
+export interface MessageBubbleView {
+  phase: string;
+  avatarUrl: string;
+  ideMode: boolean;
+  desktopMode: boolean;
+}
+
 interface MessageBubbleProps {
   inCompletedFold?: boolean;
+  view: MessageBubbleView;
   msg: {
     id: string;
     role: string;
@@ -315,8 +323,8 @@ function summarizeFileChanges(changes: MessageBubbleProps["msg"][]) {
 }
 
 
-export function MessageBubble({ msg, inCompletedFold = false }: MessageBubbleProps) {
-  const { phase, avatarUrl, ideMode, desktopMode } = useSession();
+function MessageBubbleComponent({ msg, view, inCompletedFold = false }: MessageBubbleProps) {
+  const { phase, avatarUrl, ideMode, desktopMode } = view;
   const dispatch = useSessionDispatch();
   const kind = msg.metadata?.kind as string | undefined;
   const source = (msg.metadata?.source as string | undefined) ?? "agent";
@@ -384,7 +392,7 @@ export function MessageBubble({ msg, inCompletedFold = false }: MessageBubblePro
           </summary>
           <div className="mt-4 pl-4 ml-3 border-l-2 border-gray-100 dark:border-gray-800/60 space-y-2">
             {activities.map(act => (
-              <MessageBubble key={act.id} msg={act} inCompletedFold />
+              <MessageBubble key={act.id} msg={act} view={view} inCompletedFold />
             ))}
           </div>
         </details>
@@ -423,7 +431,7 @@ export function MessageBubble({ msg, inCompletedFold = false }: MessageBubblePro
         </summary>
         <div className="mt-1.5 pl-3 ml-1.5 border-l-2 border-gray-100 dark:border-gray-800 space-y-1">
           {activities.map(act => (
-            <MessageBubble key={act.id} msg={act} />
+            <MessageBubble key={act.id} msg={act} view={view} />
           ))}
         </div>
       </details>
@@ -746,6 +754,7 @@ export function MessageBubble({ msg, inCompletedFold = false }: MessageBubblePro
 
   if (kind === "file_change_summary") {
     const changes = (msg.metadata?.changes as MessageBubbleProps["msg"][] | undefined) ?? [];
+    const compact = Boolean(msg.metadata?.compact);
     const files = summarizeFileChanges(changes);
     const totals = Array.from(files.values()).reduce(
       (sum, stats) => ({ added: sum.added + stats.added, removed: sum.removed + stats.removed }),
@@ -754,9 +763,61 @@ export function MessageBubble({ msg, inCompletedFold = false }: MessageBubblePro
 
     if (files.size === 0) return null;
 
+    const fileRows = Array.from(files.entries()).map(([path, stats]) => (
+      <button
+        key={path}
+        type="button"
+        title={path}
+        aria-label={`预览文件变更 ${path}`}
+        onClick={() => {
+          const change = [...changes].reverse().find(item => String(item.metadata?.path || "未知文件") === path);
+          const diff = change?.metadata?.diff as string | undefined;
+          const content = change?.metadata?.content as string | undefined;
+          const isMarkdown = !diff && path.toLowerCase().endsWith(".md");
+          dispatch({
+            type: "SET_ACTIVE_PREVIEW",
+            payload: {
+              type: isMarkdown ? "markdown" : "code",
+              content: diff || content || "此文件变更没有可用的 Diff 内容。",
+              language: diff ? "diff" : getLanguageFromPath(path),
+              path,
+              title: diff ? `${path} · Diff` : path,
+              messageId: `${msg.id}-${path}`,
+            },
+          });
+        }}
+        className="flex w-full cursor-pointer items-center justify-between gap-4 px-4 py-3 text-left text-[13px] text-gray-700 transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 dark:text-gray-300 dark:hover:bg-gray-800/60"
+      >
+        <span className="min-w-0 truncate">{path}</span>
+        <span className="flex shrink-0 items-center gap-2 font-mono text-xs">
+          <span className="text-green-600 dark:text-green-400">+{stats.added}</span>
+          <span className="text-red-600 dark:text-red-400">-{stats.removed}</span>
+        </span>
+      </button>
+    ));
+
+    if (compact) {
+      return (
+        <details className="group my-2 w-full">
+          <summary className="list-none inline-flex cursor-pointer select-none items-center gap-2 rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-[12px] text-gray-500 transition-colors hover:bg-gray-100 dark:border-gray-700/60 dark:bg-gray-800/50 dark:text-gray-400 dark:hover:bg-gray-800">
+            <Loader2 size={12} className="animate-spin text-blue-500" />
+            <span>已编辑 {files.size} 个文件</span>
+            <span className="flex items-center gap-1.5 font-mono text-[10px]">
+              <span className="text-green-600 dark:text-green-400">+{totals.added}</span>
+              <span className="text-red-600 dark:text-red-400">-{totals.removed}</span>
+            </span>
+            <ChevronRight size={12} className="transition-transform group-open:rotate-90" />
+          </summary>
+          <div className="mt-2 overflow-hidden rounded-lg border border-gray-200 bg-white divide-y divide-gray-100 dark:border-gray-800 dark:bg-gray-900/40 dark:divide-gray-800">
+            {fileRows}
+          </div>
+        </details>
+      );
+    }
+
     return (
-      <section className="w-full my-4 overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900/40 animate-slide-up-fade shadow-sm">
-        <div className="flex items-center justify-between gap-4 px-4 py-3 bg-gray-50/70 dark:bg-gray-900/70">
+      <details className="group w-full my-4 overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900/40 animate-slide-up-fade shadow-sm">
+        <summary className="list-none flex cursor-pointer select-none items-center justify-between gap-4 px-4 py-3 bg-gray-50/70 transition-colors hover:bg-gray-100/80 dark:bg-gray-900/70 dark:hover:bg-gray-800/80">
           <div className="flex min-w-0 items-center gap-3">
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-gray-500 shadow-sm ring-1 ring-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:ring-gray-700">
               <FileCode size={16} />
@@ -764,47 +825,17 @@ export function MessageBubble({ msg, inCompletedFold = false }: MessageBubblePro
             <span className="text-sm font-medium text-gray-800 dark:text-gray-200">
               已编辑 {files.size} 个文件
             </span>
+            <ChevronRight size={14} className="text-gray-400 transition-transform group-open:rotate-90" />
           </div>
           <div className="flex shrink-0 items-center gap-2 font-mono text-xs">
             <span className="text-green-600 dark:text-green-400">+{totals.added}</span>
             <span className="text-red-600 dark:text-red-400">-{totals.removed}</span>
           </div>
-        </div>
+        </summary>
         <div className="divide-y divide-gray-100 dark:divide-gray-800">
-          {Array.from(files.entries()).map(([path, stats]) => (
-            <button
-              key={path}
-              type="button"
-              title={path}
-              aria-label={`预览文件变更 ${path}`}
-              onClick={() => {
-                const change = [...changes].reverse().find(item => String(item.metadata?.path || "未知文件") === path);
-                const diff = change?.metadata?.diff as string | undefined;
-                const content = change?.metadata?.content as string | undefined;
-                const isMarkdown = !diff && path.toLowerCase().endsWith(".md");
-                dispatch({
-                  type: "SET_ACTIVE_PREVIEW",
-                  payload: {
-                    type: isMarkdown ? "markdown" : "code",
-                    content: diff || content || "此文件变更没有可用的 Diff 内容。",
-                    language: diff ? "diff" : getLanguageFromPath(path),
-                    path,
-                    title: diff ? `${path} · Diff` : path,
-                    messageId: `${msg.id}-${path}`,
-                  },
-                });
-              }}
-              className="flex w-full cursor-pointer items-center justify-between gap-4 px-4 py-3 text-left text-[13px] text-gray-700 transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 dark:text-gray-300 dark:hover:bg-gray-800/60"
-            >
-              <span className="min-w-0 truncate">{path}</span>
-              <span className="flex shrink-0 items-center gap-2 font-mono text-xs">
-                <span className="text-green-600 dark:text-green-400">+{stats.added}</span>
-                <span className="text-red-600 dark:text-red-400">-{stats.removed}</span>
-              </span>
-            </button>
-          ))}
+          {fileRows}
         </div>
-      </section>
+      </details>
     );
   }
 
@@ -1260,6 +1291,72 @@ export function MessageBubble({ msg, inCompletedFold = false }: MessageBubblePro
     </div>
   );
 }
+
+function messageRenderEqual(
+  previous: MessageBubbleProps["msg"],
+  next: MessageBubbleProps["msg"],
+): boolean {
+  if (previous === next) return true;
+  if (
+    previous.id !== next.id ||
+    previous.role !== next.role ||
+    previous.content !== next.content ||
+    previous.stream_id !== next.stream_id ||
+    previous.timestamp !== next.timestamp
+  ) {
+    return false;
+  }
+
+  const previousKind = previous.metadata?.kind;
+  const nextKind = next.metadata?.kind;
+  if (previousKind !== nextKind) return false;
+
+  if (previousKind === "activity_group" || previousKind === "aggressive_fold") {
+    if (
+      previous.metadata?.pending !== next.metadata?.pending ||
+      previous.metadata?.durationMs !== next.metadata?.durationMs
+    ) {
+      return false;
+    }
+    const previousActivities = (previous.metadata?.activities as MessageBubbleProps["msg"][] | undefined) ?? [];
+    const nextActivities = (next.metadata?.activities as MessageBubbleProps["msg"][] | undefined) ?? [];
+    return previousActivities.length === nextActivities.length &&
+      previousActivities.every((activity, index) => messageRenderEqual(activity, nextActivities[index]));
+  }
+
+  if (previousKind === "file_change_summary") {
+    if (previous.metadata?.compact !== next.metadata?.compact) return false;
+    const previousChanges = (previous.metadata?.changes as MessageBubbleProps["msg"][] | undefined) ?? [];
+    const nextChanges = (next.metadata?.changes as MessageBubbleProps["msg"][] | undefined) ?? [];
+    return previousChanges.length === nextChanges.length &&
+      previousChanges.every((change, index) => messageRenderEqual(change, nextChanges[index]));
+  }
+
+  if (previousKind === "tool_call" || previousKind === "tool_group") {
+    if (
+      previous.metadata?.stage !== next.metadata?.stage ||
+      previous.metadata?.tool_name !== next.metadata?.tool_name ||
+      previous.metadata?.args !== next.metadata?.args ||
+      previous.metadata?.reason !== next.metadata?.reason
+    ) {
+      return false;
+    }
+    const previousOutputs = (previous.metadata?.outputs as MessageBubbleProps["msg"][] | undefined) ?? [];
+    const nextOutputs = (next.metadata?.outputs as MessageBubbleProps["msg"][] | undefined) ?? [];
+    return previousOutputs.length === nextOutputs.length &&
+      previousOutputs.every((output, index) => messageRenderEqual(output, nextOutputs[index]));
+  }
+
+  return previous.metadata === next.metadata;
+}
+
+export const MessageBubble = React.memo(
+  MessageBubbleComponent,
+  (previous, next) =>
+    previous.inCompletedFold === next.inCompletedFold &&
+    previous.view === next.view &&
+    messageRenderEqual(previous.msg, next.msg),
+);
 
 /** Markdown 渲染（带代码高亮） */
 const MarkdownContent = React.memo(function MarkdownContent({

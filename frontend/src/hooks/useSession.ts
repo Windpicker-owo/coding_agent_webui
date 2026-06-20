@@ -5,26 +5,26 @@
  */
 
 import { useContext, useCallback } from "react";
-import { SessionContext } from "../contexts/SessionContext.tsx";
+import { SessionDispatchContext, SessionStateContext } from "../contexts/SessionContext.tsx";
 import { getWSClient } from "../utils/ws-client.ts";
 import type { SessionState, SessionAction } from "../contexts/SessionContext.tsx";
 
 /** 使用会话状态 */
 export function useSession(): SessionState {
-  const ctx = useContext(SessionContext);
-  if (!ctx) {
+  const state = useContext(SessionStateContext);
+  if (!state) {
     throw new Error("useSession must be used within SessionProvider");
   }
-  return ctx.state;
+  return state;
 }
 
 /** 使用会话 dispatch */
 export function useSessionDispatch(): React.Dispatch<SessionAction> {
-  const ctx = useContext(SessionContext);
-  if (!ctx) {
+  const dispatch = useContext(SessionDispatchContext);
+  if (!dispatch) {
     throw new Error("useSessionDispatch must be used within SessionProvider");
   }
-  return ctx.dispatch;
+  return dispatch;
 }
 
 /** 发送用户消息的便捷 hook */

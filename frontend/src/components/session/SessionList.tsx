@@ -327,28 +327,27 @@ export function SessionList({ onNewSession, onOpenProject, collapsed, onToggle }
 
             return (
               <div key={dir} className="mb-2">
-                <button
-                  onClick={() => toggleDir(dir)}
-                  className="w-full flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-900/50 rounded-lg transition-colors group/dir"
-                >
-                  <Folder size={14} className="text-gray-400 shrink-0" />
-                  <span className="text-xs font-medium text-gray-700 dark:text-gray-300 flex-1 truncate text-left">{name}</span>
-                  {isExpanded ? (
-                    <ChevronDown size={12} className="text-gray-400 shrink-0" />
-                  ) : (
-                    <ChevronRight size={12} className="text-gray-400 shrink-0" />
-                  )}
+                <div className="group/dir flex w-full items-center rounded-lg transition-colors hover:bg-gray-50 dark:hover:bg-gray-900/50">
                   <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleCloseDir(dir);
-                    }}
-                    className="opacity-0 group-hover/dir:opacity-100 text-gray-400 hover:text-red-400 transition-all p-0.5 shrink-0"
+                    onClick={() => toggleDir(dir)}
+                    className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-3 py-2"
+                  >
+                    <Folder size={14} className="text-gray-400 shrink-0" />
+                    <span className="text-xs font-medium text-gray-700 dark:text-gray-300 flex-1 truncate text-left">{name}</span>
+                    {isExpanded ? (
+                      <ChevronDown size={12} className="text-gray-400 shrink-0" />
+                    ) : (
+                      <ChevronRight size={12} className="text-gray-400 shrink-0" />
+                    )}
+                  </button>
+                  <button
+                    onClick={() => handleCloseDir(dir)}
+                    className="mr-2 shrink-0 p-0.5 text-gray-400 opacity-0 transition-all hover:text-red-400 group-hover/dir:opacity-100 focus-visible:opacity-100"
                     title="关闭项目"
                   >
                     <X size={12} />
                   </button>
-                </button>
+                </div>
                 
                 {isExpanded && (
                   <div className="pl-4 ml-[19px] border-l border-gray-100 dark:border-gray-800 mt-0.5 flex flex-col gap-0.5">

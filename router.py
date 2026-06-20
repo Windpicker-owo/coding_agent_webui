@@ -298,6 +298,67 @@ class CodingAgentWebUIRouter(BaseRouter):
                     content={"status": "error", "message": f"配置保存失败: {e}"},
                 )
 
+        # ── 模型获取工具 ──────────────────────────
+
+        async def _fetch_models_from_provider(client_type: str, api_key: str, base_url: str) -> list[str]:
+            if client_type == "anthropic":
+                from anthropic import AsyncAnthropic
+
+                client = AsyncAnthropic(api_key=api_key, base_url=base_url or None)
+            else:
+                from openai import AsyncOpenAI
+
+                client = AsyncOpenAI(api_key=api_key, base_url=base_url or None)
+            response = await client.models.list()
+            return [m.id for m in response.data]
+
+        @self._own_app.post("/api/test-provider")
+        async def test_provider(body: dict):
+            client_type = body.get("client_type", "openai")
+            api_key = body.get("api_key", "")
+            base_url = body.get("base_url", "")
+            if not api_key.strip():
+                return JSONResponse(
+                    status_code=400,
+                    content={"status": "error", "message": "API Key 不能为空"},
+                )
+            try:
+                await _fetch_models_from_provider(client_type, api_key, base_url)
+                return JSONResponse(
+                    content={"status": "ok", "message": "连接成功"},
+                    status_code=200,
+                )
+            except Exception as e:
+                return JSONResponse(
+                    content={"status": "error", "message": str(e)},
+                    status_code=200,
+                )
+
+        @self._own_app.post("/api/fetch-models")
+        async def fetch_models(body: dict):
+            client_type = body.get("client_type", "openai")
+            api_key = body.get("api_key", "")
+            base_url = body.get("base_url", "")
+            if not api_key.strip():
+                return JSONResponse(
+                    status_code=400,
+                    content={"status": "error", "message": "API Key 不能为空"},
+                )
+            try:
+                models = await _fetch_models_from_provider(client_type, api_key, base_url)
+                return JSONResponse(
+                    content={
+                        "status": "ok",
+                        "models": [{"id": mid} for mid in models],
+                    },
+                    status_code=200,
+                )
+            except Exception as e:
+                return JSONResponse(
+                    content={"status": "error", "message": str(e)},
+                    status_code=200,
+                )
+
         @self._own_app.post("/api/avatar/upload")
         async def avatar_upload(request: Request) -> dict[str, Any]:
             """接收前端 Canvas 导出的 base64 PNG，保存到 dist 目录。"""

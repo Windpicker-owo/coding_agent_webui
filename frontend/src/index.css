@@ -75,9 +75,9 @@
   --text-muted: #71717a;
 }
 
-/* 桌面模式：缩小根字号，全局等比缩至 93.75% */
+/* 桌面模式：使用默认根字号 */
 html.desktop-mode {
-  font-size: 15px;
+  font-size: 16px;
 }
 
 body {

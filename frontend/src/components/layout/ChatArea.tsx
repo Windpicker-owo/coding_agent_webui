@@ -1,8 +1,8 @@
 /** 聊天区域 */
-import { useRef, useEffect, useState, useCallback, useLayoutEffect } from "react";
+import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import { useSession } from "../../hooks/useSession.ts";
 import type { UIMessage } from "../../types/messages.ts";
-import { MessageBubble } from "../chat/MessageBubble.tsx";
+import { MessageBubble, type MessageBubbleView } from "../chat/MessageBubble.tsx";
 import { MessageInput } from "./MessageInput.tsx";
 import { isSameMessage, normalizeToolName } from "../../utils/message-utils.ts";
 import { ArrowDown, Loader2 } from "lucide-react";
@@ -46,7 +46,18 @@ function buildRenderableMessages(messages: UIMessage[], desktopMode: boolean, co
         renderable.push(currentActivityGroup);
       }
       const acts = currentActivityGroup.metadata!.activities as UIMessage[];
-      acts.push(message);
+      const activityMessage = message.metadata?.kind === "tool_call"
+        ? {
+            ...message,
+            metadata: {
+              ...message.metadata,
+              outputs: Array.isArray(message.metadata?.outputs)
+                ? [...(message.metadata.outputs as UIMessage[])]
+                : [],
+            },
+          }
+        : message;
+      acts.push(activityMessage);
       
       // Update pending status of the group
       const kind = message.metadata?.kind;
@@ -78,9 +89,12 @@ function buildRenderableMessages(messages: UIMessage[], desktopMode: boolean, co
         const acts = currentActivityGroup.metadata!.activities as UIMessage[];
         const lastToolCall = [...acts].reverse().find(m => m.metadata?.kind === "tool_call");
         if (lastToolCall) {
-          if (!lastToolCall.metadata) lastToolCall.metadata = {};
-          if (!lastToolCall.metadata.outputs) lastToolCall.metadata.outputs = [];
-          (lastToolCall.metadata.outputs as UIMessage[]).push(message);
+          const outputs = Array.isArray(lastToolCall.metadata?.outputs)
+            ? (lastToolCall.metadata.outputs as UIMessage[])
+            : [];
+          if (!outputs.some(output => isSameMessage(output, message))) {
+            lastToolCall.metadata = { ...lastToolCall.metadata, outputs: [...outputs, message] };
+          }
         } else {
           acts.push(message);
         }
@@ -223,6 +237,7 @@ function buildRenderableMessages(messages: UIMessage[], desktopMode: boolean, co
             metadata: {
               kind: "file_change_summary",
               changes: fileChanges,
+              compact: !collapseCompleted,
             },
           });
         }
@@ -239,24 +254,31 @@ function isNearBottom(el: HTMLElement): boolean {
 }
 
 export function ChatArea() {
-  const { messages, sessionId, isConnected, waitingForBot, connectionState, ideMode, desktopMode, projectName, phase } = useSession();
+  const { messages, sessionId, isConnected, waitingForBot, connectionState, avatarUrl, ideMode, desktopMode, projectName, phase } = useSession();
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const autoScrollEnabledRef = useRef(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
-  const activityBusy = waitingForBot || (phase !== "ready" && phase !== "init" && phase !== "error");
-  const [foldStable, setFoldStable] = useState(() => !activityBusy);
-  const collapseCompleted = !activityBusy && foldStable;
-  const renderableMessages = buildRenderableMessages(messages, desktopMode, collapseCompleted);
+  const completedReady = phase === "ready" && !waitingForBot;
+  const [foldStable, setFoldStable] = useState(() => completedReady);
+  const collapseCompleted = completedReady && foldStable;
+  const renderableMessages = useMemo(
+    () => buildRenderableMessages(messages, desktopMode, collapseCompleted),
+    [messages, desktopMode, collapseCompleted],
+  );
+  const bubbleView = useMemo<MessageBubbleView>(
+    () => ({ phase, avatarUrl, ideMode, desktopMode }),
+    [phase, avatarUrl, ideMode, desktopMode],
+  );
 
   // 某些阶段切换会短暂发出 ready；延迟确认空闲，避免“已处理”出现一帧后又消失。
   useEffect(() => {
     const timer = window.setTimeout(
-      () => setFoldStable(!activityBusy),
-      activityBusy ? 0 : 240,
+      () => setFoldStable(completedReady),
+      completedReady ? 240 : 0,
     );
     return () => window.clearTimeout(timer);
-  }, [activityBusy]);
+  }, [completedReady]);
 
   const stickToBottom = useCallback(() => {
     const container = scrollContainerRef.current;
@@ -283,25 +305,29 @@ export function ChatArea() {
   // 切换会话后默认恢复为自动追底
   useEffect(() => {
     autoScrollEnabledRef.current = true;
-  }, [sessionId]);
-
-  // 新消息到达后，如果用户原本就在底部附近，则继续追底
-  useLayoutEffect(() => {
-    if (!autoScrollEnabledRef.current) return;
-    stickToBottom();
-  }, [messages, stickToBottom]);
+    const frame = window.requestAnimationFrame(stickToBottom);
+    return () => window.cancelAnimationFrame(frame);
+  }, [sessionId, stickToBottom]);
 
   // ResizeObserver：观察真正的消息内容高度变化，覆盖工具气泡/文件预览/检查点等异步撑高
   useEffect(() => {
     const container = scrollContainerRef.current;
     const content = contentRef.current;
     if (!container || !content) return;
+    let frame = 0;
     const observer = new ResizeObserver(() => {
       if (!autoScrollEnabledRef.current) return;
-      stickToBottom();
+      if (frame) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        stickToBottom();
+      });
     });
     observer.observe(content);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (frame) window.cancelAnimationFrame(frame);
+    };
   }, [stickToBottom]);
 
   if (connectionState === "reconnecting") {
@@ -382,7 +408,7 @@ export function ChatArea() {
           ) : (
             <>
               {renderableMessages.map((msg) => (
-                <MessageBubble key={msg.id} msg={msg} />
+                <MessageBubble key={msg.id} msg={msg} view={bubbleView} />
               ))}
               {waitingForBot && (
                 <div className="flex items-center gap-2 text-gray-400 dark:text-gray-500 text-sm animate-pulse py-1">

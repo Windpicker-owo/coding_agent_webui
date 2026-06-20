@@ -1218,21 +1218,19 @@ function handleServerMessage(
 
 // ─── Context ─────────────────────────────────────────────
 
-interface SessionContextValue {
-  state: SessionState;
-  dispatch: React.Dispatch<SessionAction>;
-}
+const SessionStateContext = createContext<SessionState | null>(null);
+const SessionDispatchContext = createContext<React.Dispatch<SessionAction> | null>(null);
 
-const SessionContext = createContext<SessionContextValue | null>(null);
-
-export { SessionContext };
+export { SessionStateContext, SessionDispatchContext };
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(sessionReducer, initialState);
 
   return (
-    <SessionContext.Provider value={{ state, dispatch }}>
-      {children}
-    </SessionContext.Provider>
+    <SessionDispatchContext.Provider value={dispatch}>
+      <SessionStateContext.Provider value={state}>
+        {children}
+      </SessionStateContext.Provider>
+    </SessionDispatchContext.Provider>
   );
 }
