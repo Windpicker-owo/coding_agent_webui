@@ -1,10 +1,10 @@
 /** Markdown 消息气泡——支持代码高亮 */
-import React, { useState, useRef, useEffect } from "react";
+import React, { useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import type { PluggableList } from "unified";
-import { Check, Loader2, ChevronRight, Terminal, FileCode, CheckCircle2, Copy, MapPin, RotateCcw, Undo2, GitFork, ChevronDown, Milestone } from "lucide-react";
+import { Check, Loader2, ChevronRight, Terminal, FileCode, CheckCircle2, Copy, MapPin, RotateCcw, Undo2, GitFork } from "lucide-react";
 import { useSession, useSessionDispatch } from "../../hooks/useSession.ts";
 import { getWSClient } from "../../utils/ws-client.ts";
 import { normalizeToolName } from "../../utils/message-utils.ts";
@@ -19,6 +19,7 @@ interface ToolOutputMessage {
 }
 
 interface MessageBubbleProps {
+  inCompletedFold?: boolean;
   msg: {
     id: string;
     role: string;
@@ -65,6 +66,7 @@ function createCursorNode(cursorClassName: string): MarkdownAstNode {
 
 function parseAnsiToReact(text: string) {
   // 匹配常见的 ANSI 控制符
+  // eslint-disable-next-line no-control-regex
   const regex = /\x1B\[([0-9;]*)[a-zA-Z]/g;
   const parts = text.split(regex);
   let currentStyle: React.CSSProperties = {};
@@ -289,8 +291,31 @@ function getDiffStats(diff?: string): DiffStats | null {
   return { added, removed };
 }
 
+function summarizeFileChanges(changes: MessageBubbleProps["msg"][]) {
+  const files = new Map<string, DiffStats>();
 
-export function MessageBubble({ msg }: MessageBubbleProps) {
+  for (const change of changes) {
+    const path = String(change.metadata?.path || "未知文件");
+    const changeType = String(change.metadata?.change_type || "modify");
+    const diff = change.metadata?.diff as string | undefined;
+    const content = change.metadata?.content as string | undefined;
+    const stats = getDiffStats(diff) ?? { added: 0, removed: 0 };
+
+    if ((changeType === "create" || changeType === "created") && stats.added === 0 && content) {
+      stats.added = content.replace(/\n$/, "").split("\n").length;
+    }
+
+    const current = files.get(path) ?? { added: 0, removed: 0 };
+    current.added += stats.added;
+    current.removed += stats.removed;
+    files.set(path, current);
+  }
+
+  return files;
+}
+
+
+export function MessageBubble({ msg, inCompletedFold = false }: MessageBubbleProps) {
   const { phase, avatarUrl, ideMode, desktopMode } = useSession();
   const dispatch = useSessionDispatch();
   const kind = msg.metadata?.kind as string | undefined;
@@ -341,7 +366,7 @@ export function MessageBubble({ msg }: MessageBubbleProps) {
   }, [kind, msg.metadata, msg.id, dispatch]);
 
   if (kind === "aggressive_fold") {
-    const activities = (msg.metadata?.activities as any[]) || [];
+    const activities = (msg.metadata?.activities as MessageBubbleProps["msg"][]) || [];
     if (activities.length === 0) return null;
 
     const durationMs = (msg.metadata?.durationMs as number) || 0;
@@ -349,56 +374,9 @@ export function MessageBubble({ msg }: MessageBubbleProps) {
       ? `${Math.floor(durationMs / 60000)}m ${Math.floor((durationMs % 60000) / 1000)}s`
       : `${Math.floor(durationMs / 1000)}.${Math.floor((durationMs % 1000) / 100)}s`;
 
-    // Extract file changes
-    const fileChanges = new Map<string, { added: number, removed: number }>();
-    const extractChanges = (acts: any[]) => {
-      acts.forEach(a => {
-        if (a.metadata?.kind === "tool_call") {
-          const tname = normalizeToolName(a.metadata?.tool_name || "").toLowerCase();
-          if (tname.includes("write") || tname.includes("replace") || tname.includes("edit") || tname.includes("create")) {
-            const args = a.metadata?.args as any;
-            if (args) {
-              const path = args.TargetFile || args.AbsolutePath || args.path || args.file_path;
-              if (path) {
-                const pathStr = path as string;
-                if (!fileChanges.has(pathStr)) {
-                  fileChanges.set(pathStr, { added: 0, removed: 0 });
-                }
-                const stats = fileChanges.get(pathStr)!;
-                
-                if ((tname.includes("write") || tname.includes("create")) && args.CodeContent) {
-                   stats.added += args.CodeContent.split('\n').length;
-                }
-
-                if (Array.isArray(a.metadata.outputs)) {
-                  a.metadata.outputs.forEach((out: any) => {
-                    if (out.content) {
-                      const lines = out.content.split('\n');
-                      let inDiff = false;
-                      for (const line of lines) {
-                        if (line.includes('[diff_block_start]')) inDiff = true;
-                        else if (line.includes('[diff_block_end]')) inDiff = false;
-                        else if (inDiff || (out.content.includes('---') && out.content.includes('+++'))) {
-                           if (line.startsWith('+') && !line.startsWith('+++')) stats.added++;
-                           if (line.startsWith('-') && !line.startsWith('---')) stats.removed++;
-                        }
-                      }
-                    }
-                  });
-                }
-              }
-            }
-          }
-        } else if (a.metadata?.kind === "activity_group" && a.metadata?.activities) {
-          extractChanges(a.metadata.activities);
-        }
-      });
-    };
-    extractChanges(activities);
-
     return (
       <div className="w-full my-6">
-        <details className="group animate-slide-up-fade">
+        <details className="group">
           <summary className="list-none cursor-pointer select-none inline-flex items-center gap-2 px-3 py-1.5 bg-gray-50 hover:bg-gray-100 dark:bg-gray-800/50 dark:hover:bg-gray-800 rounded-full border border-gray-200 dark:border-gray-700/50 text-[13px] text-gray-600 dark:text-gray-400 transition-all">
             <Check size={14} className="text-green-500" />
             <span className="font-medium">已处理 {durationMs > 1000 ? durationStr : ""}</span>
@@ -406,44 +384,16 @@ export function MessageBubble({ msg }: MessageBubbleProps) {
           </summary>
           <div className="mt-4 pl-4 ml-3 border-l-2 border-gray-100 dark:border-gray-800/60 space-y-2">
             {activities.map(act => (
-              <MessageBubble key={act.id} msg={act} />
+              <MessageBubble key={act.id} msg={act} inCompletedFold />
             ))}
           </div>
         </details>
-        {fileChanges.size > 0 && (
-          <div className="mt-3 pl-4 animate-slide-up-fade" style={{ animationDelay: '100ms', animationFillMode: 'both' }}>
-            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">文件变动</div>
-            <div className="flex flex-col gap-1.5">
-              {Array.from(fileChanges.entries()).map(([f, stats]) => (
-                <a 
-                  key={f} 
-                  href={`file:///${f.replace(/\\/g, '/').replace(/^\/+/, '')}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center justify-between gap-3 text-[13px] text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800/40 border border-gray-200/50 dark:border-gray-700/50 px-3 py-1.5 rounded w-fit hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/30 dark:hover:border-blue-800/50 dark:hover:text-blue-400 transition-colors cursor-pointer group/file"
-                  title={`点击查看变动：${f}`}
-                >
-                  <div className="flex items-center gap-1.5">
-                    <FileCode size={13} className="text-blue-500 group-hover/file:text-blue-600 dark:group-hover/file:text-blue-400 shrink-0" />
-                    <span className="font-mono truncate max-w-sm">{f.split(/[/\\]/).pop()}</span>
-                  </div>
-                  {(stats.added > 0 || stats.removed > 0) && (
-                    <div className="flex items-center gap-2 text-[11px] font-mono shrink-0 ml-4">
-                      {stats.added > 0 && <span className="text-green-600 dark:text-green-400">+{stats.added}</span>}
-                      {stats.removed > 0 && <span className="text-red-600 dark:text-red-400">-{stats.removed}</span>}
-                    </div>
-                  )}
-                </a>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
     );
   }
 
   if (kind === "activity_group") {
-    const activities = (msg.metadata?.activities as any[]) || [];
+    const activities = (msg.metadata?.activities as MessageBubbleProps["msg"][]) || [];
     if (activities.length === 0) return null;
 
     const counts = {
@@ -502,18 +452,17 @@ export function MessageBubble({ msg }: MessageBubbleProps) {
       const rsn = reason || (args?.reason as string | undefined);
       
       return (
-        <div className={`my-3 flex justify-center w-full animate-slide-up-fade ${ideMode ? "" : "sm:max-w-3xl sm:pl-12"}`}>
-          <div className="flex flex-col items-center w-full max-w-lg">
+        <div className={`my-4 flex justify-center animate-slide-up-fade ${inCompletedFold ? "-ml-7 w-[calc(100%+1.75rem)]" : "w-full"}`}>
+          <div className="flex flex-col items-center w-full max-w-2xl px-4">
             <div className="flex items-center w-full gap-3">
-              <div className="h-px flex-1 bg-gradient-to-r from-transparent to-blue-200 dark:to-blue-800"></div>
-              <div className="flex items-center gap-1.5 px-3 py-1 bg-blue-50/80 dark:bg-blue-900/30 border border-blue-200/60 dark:border-blue-800/60 rounded-full text-blue-700 dark:text-blue-400 font-medium text-[11px] tracking-wide shadow-sm backdrop-blur-sm">
-                <Milestone size={12} className="text-blue-500 dark:text-blue-400" />
+              <div className="h-px flex-1 bg-gray-200 dark:bg-gray-800"></div>
+              <div className="text-blue-600 dark:text-blue-400 font-medium text-[11px] tracking-wide whitespace-nowrap">
                 进入阶段: {phaseName}
               </div>
-              <div className="h-px flex-1 bg-gradient-to-l from-transparent to-blue-200 dark:to-blue-800"></div>
+              <div className="h-px flex-1 bg-gray-200 dark:bg-gray-800"></div>
             </div>
             {rsn && (
-              <div className="mt-1.5 px-4 py-1 bg-white/60 dark:bg-gray-900/40 border border-gray-100 dark:border-gray-800 rounded-lg text-[10px] text-gray-500 dark:text-gray-400 text-center shadow-sm max-w-xs backdrop-blur-sm">
+              <div className="mt-1.5 text-[10px] leading-relaxed text-gray-500 dark:text-gray-400 text-center max-w-lg">
                 {rsn}
               </div>
             )}
@@ -635,7 +584,9 @@ export function MessageBubble({ msg }: MessageBubbleProps) {
           {(() => {
             if (!args || Object.keys(args).length === 0) return null;
             // 过滤掉 reason，因为已经单独显示了
-            const { reason: _r, ...displayArgs } = args;
+            const displayArgs = Object.fromEntries(
+              Object.entries(args).filter(([key]) => key !== "reason"),
+            );
             if (Object.keys(displayArgs).length === 0) return null;
 
             return (
@@ -790,6 +741,70 @@ export function MessageBubble({ msg }: MessageBubbleProps) {
           {msg.content}
         </pre>
       </div>
+    );
+  }
+
+  if (kind === "file_change_summary") {
+    const changes = (msg.metadata?.changes as MessageBubbleProps["msg"][] | undefined) ?? [];
+    const files = summarizeFileChanges(changes);
+    const totals = Array.from(files.values()).reduce(
+      (sum, stats) => ({ added: sum.added + stats.added, removed: sum.removed + stats.removed }),
+      { added: 0, removed: 0 },
+    );
+
+    if (files.size === 0) return null;
+
+    return (
+      <section className="w-full my-4 overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900/40">
+        <div className="flex items-center justify-between gap-4 px-4 py-3 bg-gray-50/70 dark:bg-gray-900/70">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-gray-500 shadow-sm ring-1 ring-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:ring-gray-700">
+              <FileCode size={16} />
+            </span>
+            <span className="text-sm font-medium text-gray-800 dark:text-gray-200">
+              已编辑 {files.size} 个文件
+            </span>
+          </div>
+          <div className="flex shrink-0 items-center gap-2 font-mono text-xs">
+            <span className="text-green-600 dark:text-green-400">+{totals.added}</span>
+            <span className="text-red-600 dark:text-red-400">-{totals.removed}</span>
+          </div>
+        </div>
+        <div className="divide-y divide-gray-100 dark:divide-gray-800">
+          {Array.from(files.entries()).map(([path, stats]) => (
+            <button
+              key={path}
+              type="button"
+              title={path}
+              aria-label={`预览文件变更 ${path}`}
+              onClick={() => {
+                const change = [...changes].reverse().find(item => String(item.metadata?.path || "未知文件") === path);
+                const diff = change?.metadata?.diff as string | undefined;
+                const content = change?.metadata?.content as string | undefined;
+                const isMarkdown = !diff && path.toLowerCase().endsWith(".md");
+                dispatch({
+                  type: "SET_ACTIVE_PREVIEW",
+                  payload: {
+                    type: isMarkdown ? "markdown" : "code",
+                    content: diff || content || "此文件变更没有可用的 Diff 内容。",
+                    language: diff ? "diff" : getLanguageFromPath(path),
+                    path,
+                    title: diff ? `${path} · Diff` : path,
+                    messageId: `${msg.id}-${path}`,
+                  },
+                });
+              }}
+              className="flex w-full cursor-pointer items-center justify-between gap-4 px-4 py-3 text-left text-[13px] text-gray-700 transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 dark:text-gray-300 dark:hover:bg-gray-800/60"
+            >
+              <span className="min-w-0 truncate">{path}</span>
+              <span className="flex shrink-0 items-center gap-2 font-mono text-xs">
+                <span className="text-green-600 dark:text-green-400">+{stats.added}</span>
+                <span className="text-red-600 dark:text-red-400">-{stats.removed}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      </section>
     );
   }
 

@@ -343,6 +343,12 @@ export interface ModelSelectedMessage {
   };
 }
 
+export interface PongMessage {
+  type: "pong";
+  id?: string;
+  payload: Record<string, never>;
+}
+
 /** 所有入站消息类型的联合 */
 export type ServerMessage =
   | SessionReadyMessage
@@ -370,7 +376,8 @@ export type ServerMessage =
   | BrowseDirectoryResultMessage
   | ProjectOpenedMessage
   | ModelListResultMessage
-  | ModelSelectedMessage;
+  | ModelSelectedMessage
+  | PongMessage;
 
 // ─── 出站消息(客户端→服务器) ─────────────────────────────
 

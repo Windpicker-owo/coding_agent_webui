@@ -14,7 +14,7 @@ function isToolResultMessage(msg: UIMessage): boolean {
   return msg.role === "system" && (kind === "console_output" || kind === "tool_result");
 }
 
-function buildRenderableMessages(messages: UIMessage[], desktopMode: boolean, isBusy: boolean): UIMessage[] {
+function buildRenderableMessages(messages: UIMessage[], desktopMode: boolean, collapseCompleted: boolean): UIMessage[] {
   const renderable: UIMessage[] = [];
   let currentToolGroup: UIMessage | null = null;
   let currentActivityGroup: UIMessage | null = null;
@@ -153,10 +153,9 @@ function buildRenderableMessages(messages: UIMessage[], desktopMode: boolean, is
     renderable.push(message);
   }
 
-  // --- Aggressive Folding Logic (Claude/Codex Style) ---
-  // When the agent is NOT busy, collapse all consecutive system/intermediate messages between user/agent messages
-  // into a single "aggressive_fold" group.
-  if (desktopMode && !isBusy) {
+  // 桌面模式下，文件变动始终汇总到本轮回复的末尾。
+  // 完成后再把其余过程消息折叠为“已处理”，正文和文件汇总保持独立且顺序稳定。
+  if (desktopMode) {
     const finalRenderable: UIMessage[] = [];
     let i = 0;
     while (i < renderable.length) {
@@ -172,51 +171,60 @@ function buildRenderableMessages(messages: UIMessage[], desktopMode: boolean, is
         
         if (block.length === 0) continue;
 
-        let lastAgentIdx = -1;
-        for (let j = block.length - 1; j >= 0; j--) {
-          if (block[j].role === "agent") {
-            lastAgentIdx = j;
-            break;
-          }
-        }
+        const fileChanges = block.filter(message => message.metadata?.kind === "file_change");
+        const contentMessages = block.filter(message => message.metadata?.kind !== "file_change");
 
-        const group: UIMessage[] = [];
-        let lastAgentMsg: UIMessage | null = null;
-
-        if (lastAgentIdx !== -1) {
-          lastAgentMsg = block[lastAgentIdx];
-          for (let j = 0; j < block.length; j++) {
-            if (j !== lastAgentIdx) {
-              group.push(block[j]);
+        if (!collapseCompleted) {
+          finalRenderable.push(...contentMessages);
+        } else {
+          let lastAgentIdx = -1;
+          for (let j = contentMessages.length - 1; j >= 0; j--) {
+            if (contentMessages[j].role === "agent") {
+              lastAgentIdx = j;
+              break;
             }
           }
-        } else {
-          group.push(...block);
+
+          const lastAgentMsg = lastAgentIdx >= 0 ? contentMessages[lastAgentIdx] : null;
+          const group = contentMessages.filter((_, index) => index !== lastAgentIdx);
+
+          if (group.length > 0) {
+            let startTime = group[0].timestamp || Date.now();
+            let endTime = startTime;
+            for (const msg of group) {
+              const ts = msg.timestamp || Date.now();
+              if (ts < startTime) startTime = ts;
+              if (ts > endTime) endTime = ts;
+            }
+            finalRenderable.push({
+              id: `agg-fold-${group[0].id}`,
+              role: "system",
+              content: "",
+              timestamp: startTime,
+              metadata: {
+                kind: "aggressive_fold",
+                activities: group,
+                durationMs: endTime - startTime,
+              }
+            } as UIMessage);
+          }
+
+          if (lastAgentMsg) {
+            finalRenderable.push(lastAgentMsg);
+          }
         }
 
-        if (group.length > 0) {
-          let startTime = group[0].timestamp || Date.now();
-          let endTime = startTime;
-          for (const msg of group) {
-            const ts = msg.timestamp || Date.now();
-            if (ts < startTime) startTime = ts;
-            if (ts > endTime) endTime = ts;
-          }
+        if (fileChanges.length > 0) {
           finalRenderable.push({
-            id: `agg-fold-${group[0].id}`,
+            id: `file-summary-${fileChanges[0].id}`,
             role: "system",
             content: "",
-            timestamp: startTime,
+            timestamp: fileChanges[0].timestamp,
             metadata: {
-              kind: "aggressive_fold",
-              activities: group,
-              durationMs: endTime - startTime,
-            }
-          } as UIMessage);
-        }
-
-        if (lastAgentMsg) {
-          finalRenderable.push(lastAgentMsg);
+              kind: "file_change_summary",
+              changes: fileChanges,
+            },
+          });
         }
       }
     }
@@ -231,13 +239,24 @@ function isNearBottom(el: HTMLElement): boolean {
 }
 
 export function ChatArea() {
-  const { messages, sessionId, isConnected, waitingForBot, connectionState, avatarUrl, ideMode, desktopMode, lastWorkDir, projectName, phase } = useSession();
+  const { messages, sessionId, isConnected, waitingForBot, connectionState, ideMode, desktopMode, projectName, phase } = useSession();
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const autoScrollEnabledRef = useRef(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
-  const isBusy = phase !== "ready" && phase !== "init" && phase !== "error";
-  const renderableMessages = buildRenderableMessages(messages, desktopMode, isBusy);
+  const activityBusy = waitingForBot || (phase !== "ready" && phase !== "init" && phase !== "error");
+  const [foldStable, setFoldStable] = useState(() => !activityBusy);
+  const collapseCompleted = !activityBusy && foldStable;
+  const renderableMessages = buildRenderableMessages(messages, desktopMode, collapseCompleted);
+
+  // 某些阶段切换会短暂发出 ready；延迟确认空闲，避免“已处理”出现一帧后又消失。
+  useEffect(() => {
+    const timer = window.setTimeout(
+      () => setFoldStable(!activityBusy),
+      activityBusy ? 0 : 240,
+    );
+    return () => window.clearTimeout(timer);
+  }, [activityBusy]);
 
   const stickToBottom = useCallback(() => {
     const container = scrollContainerRef.current;

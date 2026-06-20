@@ -114,15 +114,20 @@ class CodingAgentWebUIRouter(BaseRouter):
             import json
 
             # 桌面端版本 — 从 Tauri 配置读取
-            desktop_version = "0.1.0"
-            tauri_conf = Path(__file__).parent.parent.parent / "desktop" / "tauri" / "tauri.conf.json"
-            try:
-                if tauri_conf.exists():
-                    with open(tauri_conf, "r", encoding="utf-8") as f:
-                        conf = json.load(f)
-                    desktop_version = conf.get("version", desktop_version)
-            except Exception:
-                pass
+            desktop_version = "unknown"
+            # 优先从同目录读取（打包场景，build.bat 会复制到此）
+            local_conf = Path(__file__).parent / "tauri.conf.json"
+            # 回退到项目根路径（源码运行场景）
+            project_conf = Path(__file__).parent.parent.parent / "desktop" / "tauri" / "tauri.conf.json"
+            for conf_path in [local_conf, project_conf]:
+                try:
+                    if conf_path.exists():
+                        with open(conf_path, "r", encoding="utf-8") as f:
+                            conf = json.load(f)
+                        desktop_version = conf.get("version", desktop_version)
+                        break
+                except Exception:
+                    pass
 
             # Neo-MoFox 框架版本
             framework_version = "unknown"

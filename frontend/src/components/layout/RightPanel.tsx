@@ -1,5 +1,5 @@
 /** 文件预览侧边栏 */
-import React, { useState, useEffect } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -7,15 +7,23 @@ import { useSession, useSessionDispatch } from "../../hooks/useSession.ts";
 import { X, FileCode, ChevronDown, AlignLeft } from "lucide-react";
 import type { ContentPreviewInfo } from "../../types/messages";
 
+const DEFAULT_PANEL_WIDTH = 320;
+const MIN_PANEL_WIDTH = 280;
+const PANEL_WIDTH_STORAGE_KEY = "mofox-right-panel-width";
+
+function getMaxPanelWidth(): number {
+  if (typeof window === "undefined") return 720;
+  return Math.max(MIN_PANEL_WIDTH, Math.min(720, Math.floor(window.innerWidth * 0.55)));
+}
+
+function clampPanelWidth(width: number): number {
+  return Math.max(MIN_PANEL_WIDTH, Math.min(getMaxPanelWidth(), width));
+}
+
 function ContentPreviewBlock({ preview }: { preview: ContentPreviewInfo }) {
   const FOLD_THRESHOLD = 50000; // 在右侧面板可以显示更长
   const shouldFold = preview.content.length > FOLD_THRESHOLD;
   const [expanded, setExpanded] = useState(!shouldFold);
-
-  // 每次 preview 变化时重置
-  useEffect(() => {
-    setExpanded(!shouldFold);
-  }, [preview.messageId, shouldFold]);
 
   const header = preview.path
     ? `${preview.path}${preview.language ? ` (${preview.language})` : ""}`
@@ -103,14 +111,85 @@ function ContentPreviewBlock({ preview }: { preview: ContentPreviewInfo }) {
   );
 }
 
-export function RightPanel() {
+export function RightPanel({ desktop = false }: { desktop?: boolean }) {
   const { activePreview } = useSession();
   const dispatch = useSessionDispatch();
   const [minimized, setMinimized] = useState(false);
+  const [resizing, setResizing] = useState(false);
+  const [panelWidth, setPanelWidth] = useState(() => {
+    try {
+      const stored = Number(window.localStorage.getItem(PANEL_WIDTH_STORAGE_KEY));
+      return clampPanelWidth(Number.isFinite(stored) && stored > 0 ? stored : DEFAULT_PANEL_WIDTH);
+    } catch {
+      return DEFAULT_PANEL_WIDTH;
+    }
+  });
+  const panelWidthRef = useRef(panelWidth);
+  const resizeStartRef = useRef<{ x: number; width: number } | null>(null);
+
+  const updatePanelWidth = useCallback((width: number, persist = false) => {
+    const nextWidth = clampPanelWidth(width);
+    panelWidthRef.current = nextWidth;
+    setPanelWidth(nextWidth);
+    if (persist) {
+      try {
+        window.localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, String(nextWidth));
+      } catch {
+        // localStorage 不可用时仍保留本次会话内的宽度。
+      }
+    }
+  }, []);
 
   useEffect(() => {
-    setMinimized(false);
+    const timer = window.setTimeout(() => setMinimized(false), 0);
+    return () => window.clearTimeout(timer);
   }, [activePreview?.messageId]);
+
+  useEffect(() => {
+    const handleWindowResize = () => updatePanelWidth(panelWidthRef.current);
+    window.addEventListener("resize", handleWindowResize);
+    return () => window.removeEventListener("resize", handleWindowResize);
+  }, [updatePanelWidth]);
+
+  useEffect(() => {
+    if (!resizing) return;
+
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const start = resizeStartRef.current;
+      if (!start) return;
+      updatePanelWidth(start.width + start.x - event.clientX);
+    };
+    const handlePointerUp = () => {
+      resizeStartRef.current = null;
+      setResizing(false);
+      updatePanelWidth(panelWidthRef.current, true);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp, { once: true });
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+    };
+  }, [resizing, updatePanelWidth]);
+
+  const handleResizeKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    let nextWidth = panelWidthRef.current;
+    if (event.key === "ArrowLeft") nextWidth += 16;
+    else if (event.key === "ArrowRight") nextWidth -= 16;
+    else if (event.key === "Home") nextWidth = MIN_PANEL_WIDTH;
+    else if (event.key === "End") nextWidth = getMaxPanelWidth();
+    else return;
+    event.preventDefault();
+    updatePanelWidth(nextWidth, true);
+  }, [updatePanelWidth]);
 
   if (!activePreview) {
     return null;
@@ -129,7 +208,29 @@ export function RightPanel() {
   }
 
   return (
-    <div className="hidden xl:flex flex-col h-full bg-white dark:bg-gray-950 border-l border-gray-200 dark:border-gray-800 shadow-xl relative animate-slide-in-right w-80 2xl:w-96 shrink-0 z-20">
+    <div
+      className={`${desktop ? "flex" : "hidden xl:flex"} flex-col h-full bg-white dark:bg-gray-950 border-l border-gray-200 dark:border-gray-800 shadow-xl relative animate-slide-in-right shrink-0 z-20`}
+      style={{ width: panelWidth }}
+      data-right-panel="true"
+    >
+      <div
+        role="separator"
+        aria-label="调整右侧预览栏宽度"
+        aria-orientation="vertical"
+        aria-valuemin={MIN_PANEL_WIDTH}
+        aria-valuemax={getMaxPanelWidth()}
+        aria-valuenow={panelWidth}
+        tabIndex={0}
+        onPointerDown={(event) => {
+          event.preventDefault();
+          resizeStartRef.current = { x: event.clientX, width: panelWidthRef.current };
+          setResizing(true);
+        }}
+        onDoubleClick={() => updatePanelWidth(DEFAULT_PANEL_WIDTH, true)}
+        onKeyDown={handleResizeKeyDown}
+        title="拖动调整宽度，双击恢复默认"
+        className={`absolute -left-1 top-0 bottom-0 z-30 w-2 cursor-col-resize touch-none outline-none after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:transition-all hover:after:w-0.5 focus-visible:after:w-0.5 ${resizing ? "after:w-0.5 after:bg-blue-500" : "after:bg-transparent hover:after:bg-blue-400 focus-visible:after:bg-blue-500"}`}
+      />
       <div className="flex items-center justify-between px-4 py-2 border-b border-gray-100 dark:border-gray-800 shrink-0 bg-gray-50/50 dark:bg-gray-900/50">
         <span className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
           {activePreview.type === "markdown" ? "文档预览" : "代码预览"}
@@ -152,7 +253,7 @@ export function RightPanel() {
         </div>
       </div>
       <div className="flex-1 min-h-0">
-        <ContentPreviewBlock preview={activePreview} />
+        <ContentPreviewBlock key={activePreview.messageId || activePreview.path} preview={activePreview} />
       </div>
     </div>
   );

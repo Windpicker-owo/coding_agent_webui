@@ -327,7 +327,7 @@ function App() {
 
   // ── 主界面（含重连遮罩）──
   if (state.desktopMode) {
-    return <DesktopShell onDisconnect={handleDisconnect} />;
+    return <DesktopShell />;
   }
   return <AppShell onDisconnect={handleDisconnect} />;
 }

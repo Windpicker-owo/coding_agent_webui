@@ -1,23 +1,21 @@
-import React, { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { useSession, useSessionDispatch } from "../../hooks/useSession.ts";
 import { getWSClient } from "../../utils/ws-client.ts";
 import { SessionList } from "../session/SessionList.tsx";
 import { ChatArea } from "./ChatArea.tsx";
+import { RightPanel } from "./RightPanel.tsx";
 import { StatusBar } from "./StatusBar.tsx";
-import { getPhaseNoticeClasses } from "./AppShell.tsx";
+import { DirectoryPicker } from "./DirectoryPicker.tsx";
 import { ApprovalDialog } from "../approval/ApprovalDialog.tsx";
-import { Loader2 } from "lucide-react";
+import { FolderSearch } from "lucide-react";
 
-interface DesktopShellProps {
-  onDisconnect: () => void;
-}
-
-export function DesktopShell({ onDisconnect }: DesktopShellProps) {
+export function DesktopShell() {
   const state = useSession();
   const dispatch = useSessionDispatch();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [newWorkDir, setNewWorkDir] = useState(".");
   const [showOpenProjectDialog, setShowOpenProjectDialog] = useState(false);
+  const [showDirectoryPicker, setShowDirectoryPicker] = useState(false);
 
   // Handle open project event emitted from elsewhere
   useEffect(() => {
@@ -34,16 +32,26 @@ export function DesktopShell({ onDisconnect }: DesktopShellProps) {
   }, [dispatch]);
 
   const handleOpenProjectClick = useCallback(() => {
-    if (!newWorkDir) return;
-    try {
-      getWSClient().send("project.open", { working_directory: newWorkDir });
-      setShowOpenProjectDialog(false);
-    } catch { /* */ }
-  }, [newWorkDir]);
+    setNewWorkDir(state.lastWorkDir || ".");
+    setShowOpenProjectDialog(true);
+  }, [state.lastWorkDir]);
 
-  const isBusy = state.phase !== "ready" && state.phase !== "init" && state.phase !== "error";
-  const showActiveSpinner = state.phase === "thinking" || state.phase === "coding" || state.phase === "researching";
-  const phaseDetail = state.phaseDetail.trim();
+  const handleOpenProject = useCallback(() => {
+    const workingDirectory = newWorkDir.trim();
+    if (!workingDirectory) return;
+    try {
+      dispatch({ type: "SET_CONNECTION", payload: "reconnecting" });
+      dispatch({ type: "RESET_SESSION" });
+      dispatch({ type: "SET_LAST_WORK_DIR", payload: workingDirectory });
+      dispatch({ type: "SET_LAST_SESSION_ID", payload: "" });
+      dispatch({ type: "ADD_RECENT_PROJECT", payload: workingDirectory });
+      getWSClient().send("project.open", { working_directory: workingDirectory });
+      setShowOpenProjectDialog(false);
+    } catch {
+      dispatch({ type: "SET_CONNECTION", payload: "open" });
+      setShowOpenProjectDialog(true);
+    }
+  }, [newWorkDir, dispatch]);
 
   return (
     <div className="h-screen flex flex-col bg-white dark:bg-[#1e1e1e] text-gray-900 dark:text-[#cccccc] overflow-hidden">
@@ -84,8 +92,11 @@ export function DesktopShell({ onDisconnect }: DesktopShellProps) {
 
 
 
-          {/* Chat Area */}
-          <ChatArea />
+          {/* Chat Area + desktop preview panel */}
+          <div className="flex-1 flex min-h-0 overflow-hidden">
+            <ChatArea />
+            <RightPanel desktop />
+          </div>
         </div>
       </div>
 
@@ -109,8 +120,16 @@ export function DesktopShell({ onDisconnect }: DesktopShellProps) {
                   onChange={(e) => setNewWorkDir(e.target.value)}
                   className="flex-1 px-3 py-2 bg-gray-50 dark:bg-[#121212] border border-gray-200 dark:border-gray-700 rounded text-sm text-gray-900 dark:text-gray-100 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
                   autoFocus
-                  onKeyDown={(e) => e.key === "Enter" && handleOpenProjectClick()}
+                  onKeyDown={(e) => e.key === "Enter" && handleOpenProject()}
                 />
+                <button
+                  onClick={() => setShowDirectoryPicker(true)}
+                  className="px-2.5 py-2 text-gray-500 hover:text-blue-600 dark:hover:text-blue-400 bg-gray-50 dark:bg-[#121212] border border-gray-200 dark:border-gray-700 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                  title="浏览目录"
+                  aria-label="浏览目录"
+                >
+                  <FolderSearch size={18} />
+                </button>
               </div>
             </div>
             <div className="flex justify-end gap-2 pt-2">
@@ -121,7 +140,7 @@ export function DesktopShell({ onDisconnect }: DesktopShellProps) {
                 取消
               </button>
               <button
-                onClick={handleOpenProjectClick}
+                onClick={handleOpenProject}
                 className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors"
               >
                 打开
@@ -129,6 +148,17 @@ export function DesktopShell({ onDisconnect }: DesktopShellProps) {
             </div>
           </div>
         </div>
+      )}
+
+      {showDirectoryPicker && (
+        <DirectoryPicker
+          initialPath={newWorkDir || "/"}
+          onSelect={(selectedPath) => {
+            setNewWorkDir(selectedPath);
+            setShowDirectoryPicker(false);
+          }}
+          onCancel={() => setShowDirectoryPicker(false)}
+        />
       )}
     </div>
   );
