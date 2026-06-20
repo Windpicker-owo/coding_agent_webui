@@ -16,7 +16,7 @@ class WebUIConfig(BaseConfig):
     @config_section("server", title="HTTP 服务器", tag="network")
     class ServerSection(SectionBase):
         """独立 HTTP 服务器配置。"""
-        host: str = Field(default="0.0.0.0", description="监听地址（⚠️ 0.0.0.0 表示监听所有网卡，仅适用于桌面 localhost 场景；生产环境应改为 127.0.0.1）")
+        host: str = Field(default="127.0.0.1", description="监听地址（生产环境如需远程访问可改为 0.0.0.0）")
         port: int = Field(default=8680, description="监听端口（独立于主 HTTP 服务器）")
 
     @config_section("ws", title="WebSocket 后端", tag="network")

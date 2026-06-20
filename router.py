@@ -174,7 +174,7 @@ class CodingAgentWebUIRouter(BaseRouter):
             except Exception:
                 return JSONResponse(status_code=400, content={"status": "error", "message": "请求体必须为 JSON 格式"})
 
-            target_path = payload.get("path")
+            target_path = payload.get("path") or payload.get("config_dir")
             if not target_path:
                 return JSONResponse(status_code=400, content={"status": "error", "message": "缺少路径参数"})
 
@@ -270,11 +270,17 @@ class CodingAgentWebUIRouter(BaseRouter):
                 for new_p in providers:
                     if "***" in new_p.get("api_key", ""):
                         # 查找对应的旧提供商并还原 key
+                        matched = False
                         for old_p in old_providers:
                             if old_p.get("name") == new_p.get("name"):
                                 new_p["api_key"] = old_p.get("api_key", "")
+                                matched = True
                                 break
-                        
+                        if not matched:
+                            logger.warning(
+                                f"无法还原 API Key: provider '{new_p.get('name', '?')}' "
+                                f"在旧配置中未找到匹配项，请手动重新填写 API Key"
+                            )
             from desktop.config_generator import generate_configs
             try:
                 generate_configs(body, "config")

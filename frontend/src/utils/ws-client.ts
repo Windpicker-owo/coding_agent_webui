@@ -39,6 +39,8 @@ export class WSClient {
   private _maxReconnect = 5;
   private _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private _listeners = new Set<(state: "open" | "closed" | "error") => void>();
+  private _pingInterval: ReturnType<typeof setInterval> | null = null;
+  private _lastPongTime = 0;
 
   /** 当前连接状态 */
   get readyState(): number {
@@ -73,6 +75,8 @@ export class WSClient {
 
         this._ws.onopen = () => {
           this._reconnectCount = 0;
+          this._lastPongTime = Date.now();
+          this._startHeartbeat();
           this._notifyStateChange("open");
           resolve();
         };
@@ -80,6 +84,9 @@ export class WSClient {
         this._ws.onmessage = (event: MessageEvent) => {
           try {
             const data = JSON.parse(event.data as string) as ServerMessage;
+            if (data.type === "pong") {
+              this._lastPongTime = Date.now();
+            }
             this._dispatch(data);
           } catch {
             // JSON 解析失败 — 静默丢弃无效消息
@@ -108,6 +115,7 @@ export class WSClient {
       clearTimeout(this._reconnectTimer);
       this._reconnectTimer = null;
     }
+    this._stopHeartbeat();
     this._reconnectCount = this._maxReconnect; // 阻止自动重连
 
     if (this._ws) {
@@ -179,6 +187,31 @@ export class WSClient {
   }
 
   // ─── 内部方法 ──────────────────────────────────────────
+
+  private _startHeartbeat(): void {
+    this._stopHeartbeat();
+    this._lastPongTime = Date.now();
+    this._pingInterval = setInterval(() => {
+      if (!this._ws || this._ws.readyState !== WebSocket.OPEN) {
+        this._stopHeartbeat();
+        return;
+      }
+      // 60 秒未收到 pong 则主动断开触发重连
+      if (Date.now() - this._lastPongTime > 60_000) {
+        this._stopHeartbeat();
+        this._ws.close();
+        return;
+      }
+      this._ws.send(JSON.stringify({ type: "ping", id: generateUUID(), timestamp: Date.now() }));
+    }, 30_000);
+  }
+
+  private _stopHeartbeat(): void {
+    if (this._pingInterval !== null) {
+      clearInterval(this._pingInterval);
+      this._pingInterval = null;
+    }
+  }
 
   private _dispatch(msg: ServerMessage): void {
     // 通知通用处理器
