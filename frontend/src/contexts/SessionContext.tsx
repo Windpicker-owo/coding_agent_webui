@@ -21,6 +21,7 @@ import type {
   ResearchProgressPayload,
   SessionUsageStats,
   ContentPreviewInfo,
+  SkillInfo,
 } from "../types/messages";
 import {
   createUiMessage,
@@ -114,6 +115,8 @@ export interface SessionState {
   recentProjects: string[];
   /** 是否已确认图片上传警告 */
   imageUploadConfirmed: boolean;
+  /** 可用 Skills 列表 */
+  availableSkills: SkillInfo[];
 }
 
 /** 从 localStorage 读取持久化偏好 */
@@ -192,6 +195,7 @@ const initialState: SessionState = {
   desktopMode: false,
   recentProjects: persisted.recentProjects,
   imageUploadConfirmed: persisted.imageUploadConfirmed,
+  availableSkills: [],
 };
 
 // ─── Action 类型 ─────────────────────────────────────────
@@ -230,7 +234,8 @@ export type SessionAction =
   | { type: "SET_DESKTOP_MODE"; payload: boolean }
   | { type: "ADD_RECENT_PROJECT"; payload: string }
   | { type: "REMOVE_RECENT_PROJECT"; payload: string }
-  | { type: "SET_IMAGE_UPLOAD_CONFIRMED"; payload: boolean };
+  | { type: "SET_IMAGE_UPLOAD_CONFIRMED"; payload: boolean }
+  | { type: "SET_AVAILABLE_SKILLS"; payload: SkillInfo[] };
 
 // ─── Reducer ─────────────────────────────────────────────
 
@@ -344,6 +349,9 @@ function sessionReducer(
 
     case "SET_AVAILABLE_MODELS":
       return { ...state, availableModels: action.payload };
+
+    case "SET_AVAILABLE_SKILLS":
+      return { ...state, availableSkills: action.payload };
 
     case "SET_ACTIVE_MODEL":
       return { ...state, activeModel: action.payload };
@@ -657,6 +665,7 @@ function handleServerMessage(
         activeStreamId: null,
         waitingForBot: false,
         availableModels: p.available_models ?? state.availableModels,
+        availableSkills: [],
         activeModel: p.active_model ?? state.activeModel,
         sessions: updatedSessions,
       };
@@ -687,6 +696,7 @@ function handleServerMessage(
         phaseDetail: "",
         phase: "init",
         recentProjects: newRecent,
+        availableSkills: [],
       };
     }
 
@@ -1194,6 +1204,14 @@ function handleServerMessage(
       return {
         ...state,
         availableModels: p.models ?? [],
+      };
+    }
+    // ── Skill 列表 ──
+    case "skill.list_result": {
+      const p1 = msg.payload;
+      return {
+        ...state,
+        availableSkills: (p1.skills as SkillInfo[]) ?? [],
       };
     }
     // ── 模型选择确认 ──

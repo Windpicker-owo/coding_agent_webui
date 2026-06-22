@@ -53,7 +53,7 @@ function ContentPreviewBlock({ preview }: { preview: ContentPreviewInfo }) {
           {shouldFold && (
             <button
               onClick={() => setExpanded((v) => !v)}
-              className="mt-4 text-xs font-medium px-3 py-1.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 flex items-center gap-1 transition-colors mx-auto"
+              className="font-pixel pixel-bold mt-4 px-3 py-1.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 flex items-center gap-1 transition-colors mx-auto"
             >
               <ChevronDown
                 size={14}
@@ -96,7 +96,7 @@ function ContentPreviewBlock({ preview }: { preview: ContentPreviewInfo }) {
           <div className="p-4 flex justify-center sticky bottom-0 bg-gradient-to-t from-[#1e1e1e] dark:from-[#0d1117] pt-8">
             <button
               onClick={() => setExpanded((v) => !v)}
-              className="text-xs font-medium px-4 py-2 rounded-full bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white flex items-center gap-1 transition-colors shadow-lg border border-gray-700"
+              className="font-pixel pixel-bold px-4 py-2 rounded-full bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white flex items-center gap-1 transition-colors shadow-lg border border-gray-700"
             >
               <ChevronDown
                 size={14}

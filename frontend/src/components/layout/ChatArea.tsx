@@ -15,6 +15,24 @@ function isToolResultMessage(msg: UIMessage): boolean {
   return msg.role === "system" && (kind === "console_output" || kind === "tool_result");
 }
 
+function isPhaseBoundary(msg: UIMessage): boolean {
+  if (msg.metadata?.kind !== "tool_call") return false;
+  const rawToolName = msg.metadata?.tool_name as string | undefined;
+  const toolName = rawToolName ? normalizeToolName(rawToolName).toLowerCase() : "";
+  return toolName.includes("enter_phase") || toolName.includes("implement_plan");
+}
+
+function isActivityPending(message: UIMessage): boolean {
+  const kind = message.metadata?.kind;
+  if (kind === "tool_call") {
+    const outputs = Array.isArray(message.metadata?.outputs) ? message.metadata.outputs : [];
+    return message.metadata?.stage === "running" && outputs.length === 0;
+  }
+  if (kind === "thinking") return message.metadata?.pending === true;
+  if (kind === "research_progress") return message.metadata?.in_progress !== false;
+  return false;
+}
+
 function buildRenderableMessages(messages: UIMessage[], desktopMode: boolean, collapseCompleted: boolean): UIMessage[] {
   const renderable: UIMessage[] = [];
   let currentToolGroup: UIMessage | null = null;
@@ -22,15 +40,19 @@ function buildRenderableMessages(messages: UIMessage[], desktopMode: boolean, co
 
   const isIntermediate = (msg: UIMessage) => {
     const kind = msg.metadata?.kind as string;
-    const rawToolName = msg.metadata?.tool_name as string | undefined;
-    const toolName = rawToolName ? normalizeToolName(rawToolName).toLowerCase() : "";
-    if (kind === "tool_call" && (toolName.includes("enter_phase") || toolName.includes("implement_plan"))) {
-      return false; // Don't fold phase transitions and plan creations
+    if (msg.role !== "system" || kind === "file_change" || isToolResultMessage(msg) || isPhaseBoundary(msg)) {
+      return false;
     }
-    return msg.role === "system" && ["tool_call", "thinking", "checkpoint_created", "research_progress"].includes(kind);
+    return true;
   };
 
   for (const message of messages) {
+    if (desktopMode && message.metadata?.kind === "file_change") {
+      const last = renderable[renderable.length - 1];
+      if (!isSameMessage(last, message)) renderable.push(message);
+      continue;
+    }
+
     if (desktopMode && isIntermediate(message)) {
       if (!currentActivityGroup) {
         currentActivityGroup = {
@@ -59,28 +81,7 @@ function buildRenderableMessages(messages: UIMessage[], desktopMode: boolean, co
           }
         : message;
       acts.push(activityMessage);
-      
-      // Update pending status of the group
-      const kind = message.metadata?.kind;
-      if (kind === "tool_call") {
-        if (message.metadata?.stage === "running") {
-          currentActivityGroup.metadata!.pending = true;
-        } else {
-          currentActivityGroup.metadata!.pending = false;
-        }
-      } else if (kind === "thinking") {
-        if (message.metadata?.pending) {
-          currentActivityGroup.metadata!.pending = true;
-        } else {
-          currentActivityGroup.metadata!.pending = false;
-        }
-      } else if (kind === "research_progress") {
-        if (message.metadata?.in_progress) {
-          currentActivityGroup.metadata!.pending = true;
-        } else {
-          currentActivityGroup.metadata!.pending = false;
-        }
-      }
+      currentActivityGroup.metadata!.pending = acts.some(isActivityPending);
 
       continue;
     }
@@ -99,6 +100,7 @@ function buildRenderableMessages(messages: UIMessage[], desktopMode: boolean, co
         } else {
           acts.push(message);
         }
+        currentActivityGroup.metadata!.pending = acts.some(isActivityPending);
       } else {
         renderable.push(message);
       }
@@ -106,9 +108,9 @@ function buildRenderableMessages(messages: UIMessage[], desktopMode: boolean, co
     }
 
     if (desktopMode) {
-      // Any independent message (user, agent, or standalone system message like enter_phase)
-      // should break the current activity group to maintain chronological order.
-      currentActivityGroup = null;
+      if (message.role === "user" || message.role === "agent" || isPhaseBoundary(message)) {
+        currentActivityGroup = null;
+      }
       
       const last = renderable[renderable.length - 1];
       if (isSameMessage(last, message)) continue;
@@ -198,6 +200,7 @@ function buildRenderableMessages(messages: UIMessage[], desktopMode: boolean, co
         const fileChanges = block.filter(message => message.metadata?.kind === "file_change");
         const contentMessages = block.filter(message => message.metadata?.kind !== "file_change");
         const collapseBlock = blockStart < lastUserIndex || collapseCompleted;
+        const isCurrentTurn = blockStart > lastUserIndex;
 
         if (!collapseBlock) {
           finalRenderable.push(...contentMessages);
@@ -239,7 +242,7 @@ function buildRenderableMessages(messages: UIMessage[], desktopMode: boolean, co
           }
         }
 
-        if (collapseBlock && fileChanges.length > 0) {
+        if (fileChanges.length > 0) {
           finalRenderable.push({
             id: `file-summary-${fileChanges[0].id}`,
             role: "system",
@@ -248,6 +251,7 @@ function buildRenderableMessages(messages: UIMessage[], desktopMode: boolean, co
             metadata: {
               kind: "file_change_summary",
               changes: fileChanges,
+              autoOpen: isCurrentTurn && collapseCompleted,
             },
           });
         }
@@ -366,8 +370,8 @@ export function ChatArea() {
           <div className="w-12 h-12 mb-4 rounded-full bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center">
             <Loader2 size={24} className="animate-spin text-blue-500" />
           </div>
-          <h3 className="text-lg font-medium text-gray-800 dark:text-gray-200 mb-1">恢复会话中</h3>
-          <p className="text-gray-500 dark:text-gray-400 text-sm">正在同步数据...</p>
+          <h3 className="font-pixel pixel-shadow text-gray-800 dark:text-gray-200 mb-1" style={{ zoom: 1.5, display: 'inline-block' }}>恢复会话中</h3>
+          <p className="font-pixel text-gray-500 dark:text-gray-400">正在同步数据...</p>
         </div>
       </div>
     );
@@ -380,10 +384,10 @@ export function ChatArea() {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-4 h-full bg-white dark:bg-gray-950">
         <div className="text-center mb-8">
-          <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-200 mb-2">
+          <h2 className="font-pixel pixel-shadow text-gray-800 dark:text-gray-200 mb-2" style={{ zoom: 2, display: 'inline-block' }}>
             {isConnected ? "欢迎使用 MoFox Code" : "等待连接..."}
           </h2>
-          <p className="text-gray-500 dark:text-gray-400 text-sm mb-6">
+          <p className="font-pixel text-gray-500 dark:text-gray-400 mb-6">
             {isConnected ? "请先打开一个项目目录开始工作。" : "请先启动后端服务。"}
           </p>
           {isConnected && (
@@ -391,7 +395,7 @@ export function ChatArea() {
               onClick={() => {
                 window.dispatchEvent(new CustomEvent("open-project-dialog"));
               }}
-              className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
+              className="font-pixel pixel-bold px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
             >
               打开项目
             </button>
@@ -406,7 +410,7 @@ export function ChatArea() {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-4 h-full bg-white dark:bg-gray-950">
         <div className={`w-full ${ideMode ? '' : 'max-w-3xl'} text-center mb-8`}>
-          <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-200 mb-2">
+          <h2 className="font-pixel pixel-shadow text-gray-800 dark:text-gray-200 mb-2" style={{ zoom: 2, display: 'inline-block' }}>
             {isConnected ? "准备好开始编码了吗？" : "等待连接..."}
           </h2>
           <p className="text-gray-500 dark:text-gray-400 text-sm">
@@ -435,7 +439,7 @@ export function ChatArea() {
         <div ref={contentRef} className={`${desktopMode || ideMode ? 'w-full' : 'max-w-4xl mx-auto'} space-y-6`}>
           {renderableMessages.length === 0 ? (
             <div className="flex items-center justify-center py-10 text-gray-500 dark:text-gray-400">
-              <p className="text-sm">会话已就绪，在下方输入消息开始对话。</p>
+              <p className="font-pixel">会话已就绪，在下方输入消息开始对话。</p>
             </div>
           ) : (
             <>
@@ -447,7 +451,7 @@ export function ChatArea() {
                   <span className="inline-block w-2 h-2 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: "0ms" }} />
                   <span className="inline-block w-2 h-2 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: "150ms" }} />
                   <span className="inline-block w-2 h-2 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: "300ms" }} />
-                  <span className="ml-1 text-xs">MoFox 正在思考...</span>
+                  <span className="font-pixel ml-1">MoFox 正在思考...</span>
                 </div>
               )}
             </>

@@ -72,7 +72,7 @@ class CodingAgentWebUIRouter(BaseRouter):
         self._own_app = FastAPI(
             title=ui_cfg.title,
             description="MoFox Code WebUI",
-            version="0.2.0",
+            version="0.2.1",
         )
 
         self._own_app.add_middleware(

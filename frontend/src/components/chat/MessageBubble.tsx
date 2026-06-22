@@ -1,11 +1,11 @@
 /** Markdown 消息气泡——支持代码高亮 */
-import React, { useRef, useEffect } from "react";
+import React, { useRef, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import type { PluggableList } from "unified";
-import { Check, Loader2, ChevronRight, Terminal, FileCode, CheckCircle2, Copy, MapPin, RotateCcw, Undo2, GitFork } from "lucide-react";
-import { useSessionDispatch } from "../../hooks/useSession.ts";
+import { Check, Loader2, ChevronRight, Terminal, FileCode, CheckCircle2, Copy, MapPin, RotateCcw, Undo2, GitFork, ClipboardCheck } from "lucide-react";
+import { useSession, useSessionDispatch } from "../../hooks/useSession.ts";
 import { getWSClient } from "../../utils/ws-client.ts";
 import { normalizeToolName } from "../../utils/message-utils.ts";
 import type { ContentPreviewInfo } from "../../types/messages";
@@ -347,10 +347,128 @@ function FoxCompletionMark() {
   );
 }
 
+function RollingActivityCount({ value, shimmering = false }: { value: number; shimmering?: boolean }) {
+  const targetRef = useRef(value);
+  const [transition, setTransition] = useState({
+    from: null as number | null,
+    to: value,
+    sequence: 0,
+    rolling: true,
+  });
+
+  useEffect(() => {
+    if (value === targetRef.current) return;
+
+    const from = targetRef.current;
+    targetRef.current = value;
+    setTransition(current => ({
+      from,
+      to: value,
+      sequence: current.sequence + 1,
+      rolling: true,
+    }));
+  }, [value]);
+
+  useEffect(() => {
+    if (!transition.rolling) return;
+    const finishTimer = window.setTimeout(() => {
+      setTransition(current =>
+        current.sequence === transition.sequence
+          ? { ...current, from: current.to, rolling: false }
+          : current
+      );
+    }, 500);
+    return () => window.clearTimeout(finishTimer);
+  }, [transition.rolling, transition.sequence]);
+
+  return (
+    <span className="activity-count-window tabular-nums" aria-label={String(value)}>
+      {transition.rolling ? (
+        <span key={transition.sequence} className="activity-count-reel is-rolling" aria-hidden="true">
+          <span className={shimmering ? "activity-shimmer-text" : undefined}>{transition.from ?? "\u00a0"}</span>
+          <span className={shimmering ? "activity-shimmer-text" : undefined}>{transition.to}</span>
+        </span>
+      ) : (
+        <span className={shimmering ? "activity-shimmer-text" : undefined} aria-hidden="true">{transition.to}</span>
+      )}
+    </span>
+  );
+}
+
+function truncatePreview(value: string, maxLength = 108): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1)}…` : normalized;
+}
+
+function latestThinkingParagraph(content: string): string {
+  const paragraphs = content
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean);
+  const latest = paragraphs[paragraphs.length - 1] || "";
+  return truncatePreview(
+    latest
+      .replace(/^#{1,6}\s+/, "")
+      .replace(/^[-*+]\s+/, "")
+      .replace(/[`*_~]/g, ""),
+  );
+}
+
+interface ActivityPreview {
+  kind: "thinking" | "tool";
+  text: string;
+}
+
+function getActivityPreview(activities: MessageBubbleProps["msg"][]): ActivityPreview | null {
+  const latest = [...activities].reverse().find(activity =>
+    activity.metadata?.kind === "thinking" || activity.metadata?.kind === "tool_call"
+  );
+  if (!latest) return null;
+
+  if (latest.metadata?.kind === "thinking") {
+    const text = latestThinkingParagraph(latest.content || "");
+    return text ? { kind: "thinking", text } : null;
+  }
+
+  const rawToolName = String(latest.metadata?.tool_name || "tool");
+  const toolName = (normalizeToolName(rawToolName) || rawToolName).toLowerCase();
+  const args = (latest.metadata?.args as Record<string, unknown> | undefined) ?? {};
+  const argsSummary = String(latest.metadata?.args_summary || "");
+  const firstString = (...values: unknown[]) => {
+    const found = values.find(value => typeof value === "string" && value.trim());
+    return typeof found === "string" ? found : "";
+  };
+  const path = firstString(
+    args.path,
+    args.file_path,
+    args.AbsolutePath,
+    args.TargetFile,
+    args.DirectoryPath,
+    args.SearchPath,
+  );
+  const command = firstString(args.command, args.CommandLine, args.cmd, argsSummary);
+  const query = firstString(args.query, args.Query, args.pattern);
+
+  if (toolName.includes("console") || toolName.includes("shell")) {
+    return { kind: "tool", text: truncatePreview(`Ran: ${command || rawToolName}`) };
+  }
+  if (toolName.includes("edit") || toolName.includes("write") || toolName.includes("apply_patch")) {
+    return { kind: "tool", text: truncatePreview(`Edit: ${path || rawToolName}`) };
+  }
+  if (toolName.includes("read")) {
+    return { kind: "tool", text: truncatePreview(`Read: ${path || rawToolName}`) };
+  }
+  if (toolName.includes("grep") || toolName.includes("find") || toolName.includes("search")) {
+    return { kind: "tool", text: truncatePreview(`Search: ${query || path || rawToolName}`) };
+  }
+  return { kind: "tool", text: truncatePreview(`Used: ${rawToolName}`) };
+}
+
 
 function MessageBubbleComponent({ msg, view, inCompletedFold = false }: MessageBubbleProps) {
   const { phase, avatarUrl, ideMode, desktopMode } = view;
   const dispatch = useSessionDispatch();
+  const state = useSession();
   const kind = msg.metadata?.kind as string | undefined;
   const source = (msg.metadata?.source as string | undefined) ?? "agent";
   const agentAccent = getAgentAccent(source);
@@ -410,9 +528,9 @@ function MessageBubbleComponent({ msg, view, inCompletedFold = false }: MessageB
     return (
       <div className="w-full my-6 animate-slide-up-fade">
         <details className="group">
-          <summary className="list-none inline-flex cursor-pointer select-none items-center gap-2 rounded-full border border-orange-200/70 bg-gradient-to-r from-white via-orange-50/60 to-white py-1.5 pl-1.5 pr-3 text-[13px] text-gray-600 shadow-sm outline-none transition-all hover:border-orange-300 hover:shadow-md focus-visible:border-orange-300 focus-visible:ring-2 focus-visible:ring-orange-200/60 dark:border-orange-900/60 dark:from-gray-900 dark:via-orange-950/25 dark:to-gray-900 dark:text-gray-300 dark:hover:border-orange-800 dark:focus-visible:border-orange-700 dark:focus-visible:ring-orange-900/50">
+          <summary className="list-none inline-flex cursor-pointer select-none items-center gap-2 rounded-full border border-orange-200/70 bg-gradient-to-r from-white via-orange-50/60 to-white py-1.5 pl-1.5 pr-3 font-pixel text-gray-600 shadow-sm outline-none transition-all hover:border-orange-300 hover:shadow-md focus-visible:border-orange-300 focus-visible:ring-2 focus-visible:ring-orange-200/60 dark:border-orange-900/60 dark:from-gray-900 dark:via-orange-950/25 dark:to-gray-900 dark:text-gray-300 dark:hover:border-orange-800 dark:focus-visible:border-orange-700 dark:focus-visible:ring-orange-900/50" style={{ zoom: 1.0833 }}>
             <FoxCompletionMark />
-            <span className="font-medium">已处理</span>
+            <span>已处理</span>
             {durationMs > 1000 && (
               <span className="tabular-nums text-gray-400 dark:text-gray-500">{durationStr}</span>
             )}
@@ -439,23 +557,38 @@ function MessageBubbleComponent({ msg, view, inCompletedFold = false }: MessageB
       research: activities.filter(a => a.metadata?.kind === "research_progress").length,
     };
     
-    let summaryText = "";
-    if (counts.tools) summaryText += `${counts.tools} 个工具调用 `;
-    if (counts.thoughts) summaryText += `${counts.thoughts} 次思考 `;
-    if (counts.checkpoints) summaryText += `${counts.checkpoints} 个检查点 `;
-    if (counts.research) summaryText += `${counts.research} 次研究 `;
-    
-    const pending = msg.metadata?.pending;
+    const summaryItems = [
+      { count: counts.thoughts, label: "次思考" },
+      { count: counts.tools, label: "个工具调用" },
+      { count: counts.checkpoints, label: "个检查点" },
+      { count: counts.research, label: "次研究" },
+    ].filter(item => item.count > 0);
+    const pending = msg.metadata?.pending === true && !["ready", "error", "init"].includes(phase);
+    const preview = getActivityPreview(activities);
     
     return (
       <details className="group animate-slide-up-fade mb-3 w-full">
-        <summary className="list-none cursor-pointer select-none inline-flex items-center gap-1.5 text-[13px] text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors">
+        <summary className="list-none cursor-pointer select-none inline-flex max-w-full items-start gap-1.5 text-gray-500 transition-colors hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
           {pending ? (
-            <Loader2 size={12} className="animate-spin text-blue-500" />
+            <Loader2 size={12} className="mt-0.5 shrink-0 animate-spin text-blue-500" />
           ) : (
-            <ChevronRight size={14} className="text-gray-400 group-open:rotate-90 transition-transform" />
+            <ChevronRight size={14} className="mt-0.5 shrink-0 text-gray-400 transition-transform group-open:rotate-90" />
           )}
-          <span>{summaryText || "后台活动"}</span>
+          <span className="flex min-w-0 flex-col gap-0.5">
+            <span className="inline-flex flex-wrap items-center gap-x-1.5 font-pixel" style={{ zoom: 1.0833 }}>
+              {summaryItems.length > 0 ? summaryItems.map(item => (
+                <span key={item.label} className="inline-flex items-baseline gap-0.5 whitespace-nowrap">
+                  <RollingActivityCount value={item.count} shimmering={pending} />
+                  <span className={pending ? "activity-shimmer-text" : undefined}>{item.label}</span>
+                </span>
+              )) : <span className={pending ? "activity-shimmer-text" : undefined}>后台活动</span>}
+            </span>
+            {pending && preview && (
+              <span className={`block max-w-[min(42rem,75vw)] truncate text-[12px] leading-5 text-gray-400 dark:text-gray-500 activity-shimmer-text ${preview.kind === "thinking" ? "italic" : ""}`} style={{ fontFamily: 'var(--font-sans)', fontSynthesis: 'style auto' }}>
+                {preview.text}
+              </span>
+            )}
+          </span>
         </summary>
         <div className="mt-1.5 pl-3 ml-1.5 border-l-2 border-gray-100 dark:border-gray-800 space-y-1">
           {activities.map(act => (
@@ -666,7 +799,7 @@ function MessageBubbleComponent({ msg, view, inCompletedFold = false }: MessageB
               <div className="mt-3">
                 <button
                   onClick={() => dispatch({ type: "SET_ACTIVE_PREVIEW", payload: preview })}
-                  className="px-3 py-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors flex items-center gap-1.5 shadow-sm"
+                  className="font-pixel pixel-bold px-3 py-1.5 text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors flex items-center gap-1.5 shadow-sm"
                 >
                   <FileCode size={14} />
                   在右侧预览文件内容
@@ -730,7 +863,7 @@ function MessageBubbleComponent({ msg, view, inCompletedFold = false }: MessageB
           {pending && <Loader2 size={12} className="animate-spin" />}
           <span>{pending ? "正在思考..." : `思考过程 (${elapsedStr ?? "刚刚"})`}</span>
         </summary>
-        <div className="mt-1 p-3 bg-gray-100 dark:bg-gray-800/50 rounded text-xs text-gray-500 dark:text-gray-400 border-l-2 border-gray-300 dark:border-gray-700 overflow-x-auto">
+        <div className="mt-1 p-3 bg-gray-100 dark:bg-gray-800/50 rounded text-xs text-gray-500 dark:text-gray-400 border-l-2 border-gray-300 dark:border-gray-700 overflow-x-auto italic">
           <MarkdownContent content={msg.content} />
         </div>
       </details>
@@ -833,13 +966,13 @@ function MessageBubbleComponent({ msg, view, inCompletedFold = false }: MessageB
     ));
 
     return (
-      <details className="group w-full my-4 overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900/40 animate-slide-up-fade shadow-sm">
+      <details open={msg.metadata?.autoOpen === true} className="group w-full my-4 overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900/40 animate-slide-up-fade shadow-sm">
         <summary className="list-none flex cursor-pointer select-none items-center justify-between gap-4 px-4 py-3 bg-gray-50/70 transition-colors hover:bg-gray-100/80 dark:bg-gray-900/70 dark:hover:bg-gray-800/80">
           <div className="flex min-w-0 items-center gap-3">
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-gray-500 shadow-sm ring-1 ring-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:ring-gray-700">
               <FileCode size={16} />
             </span>
-            <span className="text-sm font-medium text-gray-800 dark:text-gray-200">
+            <span className="font-pixel text-gray-800 dark:text-gray-200" style={{ zoom: 1.1667 }}>
               已编辑 {files.size} 个文件
             </span>
             <ChevronRight size={14} className="text-gray-400 transition-transform group-open:rotate-90" />
@@ -852,6 +985,56 @@ function MessageBubbleComponent({ msg, view, inCompletedFold = false }: MessageB
         <div className="divide-y divide-gray-100 dark:divide-gray-800">
           {fileRows}
         </div>
+        {(() => {
+          const mdCreateChange = changes.find(
+            c => (c.metadata?.change_type === "create" || c.metadata?.change_type === "created")
+              && String(c.metadata?.path || "").toLowerCase().endsWith(".md")
+          );
+          const mdCreatePath = mdCreateChange?.metadata?.path as string | undefined;
+          if (!mdCreatePath) return null;
+          return (
+            <div className="mt-2 flex justify-end gap-2 px-4 pb-3">
+              <button
+                onClick={() => {
+                  const goalText = `迭代此目标文档（${mdCreatePath}），直到此文档中的目标全部完成且实现完整，无暗病、bug、偏离，最终质量达到产品级交付水准。`;
+                  try {
+                    getWSClient().send("goal.set", { text: goalText });
+                    dispatch({ type: "SET_GOAL_MODE", payload: true });
+                  } catch { /* ignore */ }
+                }}
+                className="text-xs font-medium inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 border border-orange-200 dark:border-orange-800 hover:bg-orange-100 dark:hover:bg-orange-900/30 transition-colors"
+              >
+                🎯 设为 Goal
+              </button>
+              <button
+                onClick={() => {
+                  const content = `批准计划：${mdCreatePath}`;
+                  const isBusy = state.phase !== "ready" && state.phase !== "init" && state.phase !== "error";
+                  const kind = isBusy ? "guidance" : "message";
+                  try {
+                    const clientMessageId = getWSClient().send("user.message", { content, kind });
+                    dispatch({
+                      type: "ADD_LOCAL_MESSAGE",
+                      payload: {
+                        role: "user",
+                        content,
+                        metadata: {
+                          client_message_id: clientMessageId,
+                          local_pending: true,
+                          ...(kind === "guidance" ? { kind } : {}),
+                        },
+                      },
+                    });
+                  } catch { /* ignore */ }
+                }}
+                className="text-xs font-medium inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 border border-green-200 dark:border-green-800 hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors"
+              >
+                <ClipboardCheck size={14} />
+                批准计划
+              </button>
+            </div>
+          );
+        })()}
       </details>
     );
   }
@@ -918,7 +1101,7 @@ function MessageBubbleComponent({ msg, view, inCompletedFold = false }: MessageB
           <div className="mt-3 ml-1 mb-2">
             <button
               onClick={() => dispatch({ type: "SET_ACTIVE_PREVIEW", payload: { ...contentPreview, messageId: msg.id } })}
-              className="px-3 py-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors flex items-center gap-1.5 shadow-sm"
+              className="font-pixel pixel-bold px-3 py-1.5 text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors flex items-center gap-1.5 shadow-sm"
             >
               <FileCode size={14} />
               在右侧预览新建文件
@@ -931,7 +1114,7 @@ function MessageBubbleComponent({ msg, view, inCompletedFold = false }: MessageB
           </div>
         )}
         {isMdCreate && (
-          <div className="mt-2 flex justify-end">
+          <div className="mt-2 flex justify-end gap-2">
             <button
               onClick={() => {
                 const goalText = `迭代此目标文档（${path}），直到此文档中的目标全部完成且实现完整，无暗病、bug、偏离，最终质量达到产品级交付水准。`;
@@ -940,9 +1123,35 @@ function MessageBubbleComponent({ msg, view, inCompletedFold = false }: MessageB
                   dispatch({ type: "SET_GOAL_MODE", payload: true });
                 } catch { /* ignore */ }
               }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 border border-orange-200 dark:border-orange-800 hover:bg-orange-100 dark:hover:bg-orange-900/30 transition-colors"
+              className="text-xs font-medium inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 border border-orange-200 dark:border-orange-800 hover:bg-orange-100 dark:hover:bg-orange-900/30 transition-colors"
             >
               🎯 设为 Goal
+            </button>
+            <button
+              onClick={() => {
+                const content = `批准计划：${path}`;
+                const isBusy = state.phase !== "ready" && state.phase !== "init" && state.phase !== "error";
+                const kind = isBusy ? "guidance" : "message";
+                try {
+                  const clientMessageId = getWSClient().send("user.message", { content, kind });
+                  dispatch({
+                    type: "ADD_LOCAL_MESSAGE",
+                    payload: {
+                      role: "user",
+                      content,
+                      metadata: {
+                        client_message_id: clientMessageId,
+                        local_pending: true,
+                        ...(kind === "guidance" ? { kind } : {}),
+                      },
+                    },
+                  });
+                } catch { /* ignore */ }
+              }}
+              className="text-xs font-medium inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 border border-green-200 dark:border-green-800 hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors"
+            >
+              <ClipboardCheck size={14} />
+              批准计划
             </button>
           </div>
         )}
@@ -1219,23 +1428,22 @@ function MessageBubbleComponent({ msg, view, inCompletedFold = false }: MessageB
         className={`${desktopMode || ideMode ? 'w-full' : 'max-w-[85%] sm:max-w-[75%]'} flex flex-col ${desktopMode && isUser ? 'items-end' : ''}`}
       >
         {desktopMode && !isUser && (
-          <div className="text-xs font-semibold mb-1 select-none flex items-center gap-1.5">
-            <span 
+          <div className="font-pixel pixel-bold mb-1 select-none flex items-center gap-1.5">
+            <span
               className={`${
                 source === "coder" 
                   ? "text-orange-500 dark:text-orange-400" 
                   : source === "solo"
                     ? "text-cyan-500 dark:text-cyan-400"
                     : "text-blue-500 dark:text-blue-400"
-              }`}
-              style={{ fontFamily: "'Nunito', 'Comic Sans MS', 'Chalkboard SE', 'Marker Felt', sans-serif" }}
+              } tracking-wider`}
             >
               {source === "coder" ? "Coder" : source === "solo" ? "SOLO" : "MoFox"}
             </span>
           </div>
         )}
         {!isUser && !isSystem && !ideMode && !desktopMode && (
-          <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 ml-1 select-none flex items-center gap-1.5">
+          <div className="font-pixel pixel-bold text-gray-500 dark:text-gray-400 mb-1 ml-1 select-none flex items-center gap-1.5">
             {source === "coder" ? "Coder Agent" : source === "solo" ? "SOLO Agent" : "Main Agent"}
           </div>
         )}
@@ -1281,7 +1489,7 @@ function MessageBubbleComponent({ msg, view, inCompletedFold = false }: MessageB
                   });
                   dispatch({ type: "SET_RECALL_CONTENT", payload: msg.content });
                 }}
-                className="message-action-button"
+                className="font-pixel pixel-bold message-action-button"
                 title="撤回这条消息并回滚之后的修改"
               >
                 <Undo2 size={12} />
@@ -1295,7 +1503,7 @@ function MessageBubbleComponent({ msg, view, inCompletedFold = false }: MessageB
                     anchor_message_id: msg.id,
                   })
                 }
-                className="message-action-button"
+                className="font-pixel pixel-bold message-action-button"
                 title="从这条回复分叉出一个新会话"
               >
                 <GitFork size={12} />
@@ -1342,6 +1550,7 @@ function messageRenderEqual(
   }
 
   if (previousKind === "file_change_summary") {
+    if (previous.metadata?.autoOpen !== next.metadata?.autoOpen) return false;
     const previousChanges = (previous.metadata?.changes as MessageBubbleProps["msg"][] | undefined) ?? [];
     const nextChanges = (next.metadata?.changes as MessageBubbleProps["msg"][] | undefined) ?? [];
     return previousChanges.length === nextChanges.length &&
@@ -1425,7 +1634,7 @@ const MarkdownContent = React.memo(function MarkdownContent({
             const isInline = !className;
             return isInline ? (
               <code
-                className="bg-gray-200 dark:bg-gray-700 px-1 py-0.5 rounded text-xs text-pink-600 dark:text-pink-300"
+                className="bg-gray-200 dark:bg-gray-700 px-1 py-0.5 rounded text-xs text-pink-600 dark:text-pink-300 font-mono"
                 {...props}
               >
                 {children}

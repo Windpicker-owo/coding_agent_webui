@@ -253,10 +253,10 @@ export function SessionList({ onNewSession, onOpenProject, collapsed, onToggle }
             }
             onNewSession();
           }}
-          className="flex-1 flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white py-2 px-3 rounded-xl font-medium transition-colors shadow-sm text-sm"
+          className="flex-1 flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white py-2 px-3 rounded-xl transition-colors shadow-sm font-pixel"
         >
           <Plus size={16} />
-          新建会话
+          <span style={{ zoom: 1.1667, display: 'inline-block' }}>新建会话</span>
         </button>
         <button
           onClick={() => onOpenProject()}
@@ -269,7 +269,7 @@ export function SessionList({ onNewSession, onOpenProject, collapsed, onToggle }
 
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2.5">
-        <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">项目</span>
+        <span className="font-pixel pixel-bold uppercase tracking-wider text-gray-500">项目</span>
         <div className="flex items-center gap-1">
           <button
             onClick={refreshList}
@@ -295,16 +295,16 @@ export function SessionList({ onNewSession, onOpenProject, collapsed, onToggle }
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="搜索会话..."
-          className="w-full px-3 py-1.5 bg-gray-50 dark:bg-gray-900 border border-transparent focus:border-gray-200 dark:focus:border-gray-700 rounded-lg text-xs text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-4 focus:ring-gray-100 dark:focus:ring-gray-800 transition-all"
+          className="font-pixel w-full px-3 py-1.5 bg-gray-50 dark:bg-gray-900 border border-transparent focus:border-gray-200 dark:focus:border-gray-700 rounded-lg text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-4 focus:ring-gray-100 dark:focus:ring-gray-800 transition-all"
         />
       </div>
 
       {/* 列表 */}
       <div className="flex-1 overflow-y-auto pb-4">
         {loading && dirsToDisplay.length === 0 ? (
-          <div className="p-3 text-xs text-gray-400 dark:text-gray-500 text-center">加载中...</div>
+          <div className="font-pixel p-3 text-gray-400 dark:text-gray-500 text-center">加载中...</div>
         ) : dirsToDisplay.length === 0 ? (
-          <div className="p-3 text-xs text-gray-400 dark:text-gray-600 text-center">
+          <div className="font-pixel p-3 text-gray-400 dark:text-gray-600 text-center">
             暂无项目
           </div>
         ) : (
@@ -460,7 +460,7 @@ export function SessionList({ onNewSession, onOpenProject, collapsed, onToggle }
     {pendingResume && (
       <div className="fixed inset-0 z-50 bg-black/60 p-4 flex items-center justify-center">
         <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl max-w-sm w-full p-6 space-y-4">
-          <h3 className="text-sm font-semibold text-yellow-600 dark:text-yellow-400 flex items-center gap-2">
+          <h3 className="font-pixel pixel-bold text-yellow-600 dark:text-yellow-400 flex items-center gap-2">
             ⚠ 切换会话警告
           </h3>
           <p className="text-sm text-gray-600 dark:text-gray-400">
@@ -473,13 +473,13 @@ export function SessionList({ onNewSession, onOpenProject, collapsed, onToggle }
           <div className="flex gap-2 pt-2">
             <button
               onClick={cancelResume}
-              className="flex-1 py-2 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 font-medium rounded-lg text-sm transition-colors"
+              className="font-pixel flex-1 py-2 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg transition-colors"
             >
               取消
             </button>
             <button
               onClick={confirmResume}
-              className="flex-1 py-2 bg-yellow-600 hover:bg-yellow-700 text-white font-medium rounded-lg text-sm transition-colors"
+              className="font-pixel pixel-bold flex-1 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg transition-colors"
             >
               仍然切换
             </button>

@@ -14,6 +14,8 @@ export function MessageInput() {
   const [pendingImages, setPendingImages] = useState<string[]>([]); // base64 data URLs
   const [showImageWarning, setShowImageWarning] = useState(false);
   const [pendingImageFiles, setPendingImageFiles] = useState<File[]>([]); // files waiting for confirmation
+  const [skillQuery, setSkillQuery] = useState<string | null>(null); // null = 不显示下拉
+  const [skillSelectedIndex, setSkillSelectedIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const prevSessionRef = useRef(state.sessionId);
   const isBusy = state.phase !== "ready" && state.phase !== "init" && state.phase !== "error";
@@ -45,6 +47,15 @@ export function MessageInput() {
     }
   }, [state.isConnected, state.availableModels.length]);
 
+  // 连接后拉取 Skills 列表
+  useEffect(() => {
+    if (state.isConnected && state.sessionId && state.availableSkills.length === 0) {
+      try {
+        getWSClient().send("skill.list", {});
+      } catch { /* ignore */ }
+    }
+  }, [state.isConnected, state.sessionId, state.availableSkills.length]);
+
   // Recall content: when user clicks undo, fill the input box
   useEffect(() => {
     if (state.recallContent !== null) {
@@ -62,6 +73,35 @@ export function MessageInput() {
       textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
     }
   }, [text]);
+
+  // ── Skill 自动补全 ────────────────────────────────────
+
+  /** 当前可用的过滤后 skill 列表 */
+  const filteredSkills = skillQuery !== null
+    ? state.availableSkills.filter(s =>
+        s.name.toLowerCase().includes(skillQuery.toLowerCase())
+      )
+    : [];
+
+  /** 选中 skill 并插入到 textarea */
+  const insertSkill = (skillName: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const cursorPos = textarea.selectionStart;
+    const beforeCursor = text.substring(0, cursorPos);
+    const afterCursor = text.substring(cursorPos);
+    const slashIdx = beforeCursor.lastIndexOf('/');
+    if (slashIdx === -1) return;
+    const newText = beforeCursor.substring(0, slashIdx) + `/${skillName} ` + afterCursor;
+    setText(newText);
+    setSkillQuery(null);
+    setSkillSelectedIndex(0);
+    const newCursorPos = slashIdx + skillName.length + 2; // /name + space
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(newCursorPos, newCursorPos);
+    }, 0);
+  };
 
   const doProcessImages = (files: File[]) => {
     files.forEach((file) => {
@@ -127,7 +167,69 @@ export function MessageInput() {
     }
   };
 
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const newText = e.target.value;
+    setText(newText);
+
+    // 检测 skill 触发：取光标前的文本，查找最近的 /
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const cursorPos = textarea.selectionStart;
+    const beforeCursor = newText.substring(0, cursorPos);
+    const slashIdx = beforeCursor.lastIndexOf('/');
+    if (slashIdx === -1) {
+      setSkillQuery(null);
+      setSkillSelectedIndex(0);
+      return;
+    }
+    const afterSlash = beforeCursor.substring(slashIdx + 1);
+    // / 后必须无空格、无换行才算 skill query
+    if (/[\s\n]/.test(afterSlash)) {
+      setSkillQuery(null);
+      setSkillSelectedIndex(0);
+      return;
+    }
+    setSkillQuery(afterSlash);
+    setSkillSelectedIndex(0);
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Skill 下拉激活时的键盘导航
+    if (skillQuery !== null && filteredSkills.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSkillSelectedIndex(i => Math.min(i + 1, filteredSkills.length - 1));
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSkillSelectedIndex(i => Math.max(i - 1, 0));
+        return;
+      }
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        insertSkill(filteredSkills[skillSelectedIndex].name);
+        return;
+      }
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        insertSkill(filteredSkills[skillSelectedIndex].name);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setSkillQuery(null);
+        return;
+      }
+    }
+
+    // 无匹配 skill 时 Escape 关闭提示
+    if (skillQuery !== null && e.key === 'Escape') {
+      e.preventDefault();
+      setSkillQuery(null);
+      return;
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
@@ -153,11 +255,11 @@ export function MessageInput() {
   return (
     <div className={state.ideMode ? "w-full" : "max-w-3xl mx-auto relative"}>
       <div className={`flex flex-col bg-transparent transition-all duration-200 ${state.ideMode ? 'border-none' : 'rounded-[1.5rem] border shadow-md bg-white dark:bg-[#1e1e1e]'} ${disabled ? (state.ideMode ? 'opacity-70' : 'border-gray-200 dark:border-[#2b2b2b] opacity-70') : (state.ideMode ? '' : 'border-gray-300 dark:border-[#3b3b3b] focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/10 focus-within:shadow-lg')}`}>
-        <div className={`flex ${state.ideMode ? 'px-3 pt-2' : 'px-4 pt-3'}`}>
+        <div className={`flex relative ${state.ideMode ? 'px-3 pt-2' : 'px-4 pt-3'}`}>
           <textarea
             ref={textareaRef}
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={handleChange}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
             placeholder={
@@ -175,7 +277,44 @@ export function MessageInput() {
             autoFocus
           />
         </div>
-        
+
+        {/* Skill 自动补全下拉 */}
+        {skillQuery !== null && (
+          <div className="absolute left-0 right-0 mx-3 z-50 border border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-[#1e1e1e] shadow-lg overflow-hidden"
+               style={{ bottom: "100%", marginBottom: "4px" }}>
+            {filteredSkills.length > 0 ? (
+              <div className="max-h-48 overflow-y-auto py-1">
+                {filteredSkills.map((skill, idx) => (
+                  <div
+                    key={skill.name}
+                    className={`px-3 py-2 cursor-pointer flex items-center gap-2 transition-colors ${
+                      idx === skillSelectedIndex
+                        ? "bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
+                        : "text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+                    }`}
+                    onClick={() => insertSkill(skill.name)}
+                    onMouseEnter={() => setSkillSelectedIndex(idx)}
+                  >
+                    <span className="text-xs text-gray-400 dark:text-gray-500 shrink-0">/</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium truncate">{skill.name}</div>
+                      {skill.description && (
+                        <div className="text-xs text-gray-400 dark:text-gray-500 truncate">{skill.description}</div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="px-3 py-2 text-sm text-gray-400 dark:text-gray-500">
+                {state.availableSkills.length === 0
+                  ? "当前项目暂无可用 Skill（在 .agents/skills/ 下创建）"
+                  : `没有匹配 "${skillQuery}" 的 Skill`}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* 图片预览 */}
         {pendingImages.length > 0 && (
           <div className="flex gap-2 px-4 pt-2 flex-wrap">
@@ -246,7 +385,7 @@ export function MessageInput() {
               <div className="flex bg-gray-100 dark:bg-gray-800 p-0.5 rounded-lg">
                 <button
                   onClick={() => dispatch({ type: "SET_SOLO_MODE", payload: false })}
-                  className={`px-3 py-1 text-[11px] font-medium rounded-md transition-all ${
+                  className={`font-pixel pixel-bold px-3 py-1 rounded-md transition-all ${
                     !state.soloMode
                       ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
                       : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
@@ -256,7 +395,7 @@ export function MessageInput() {
                 </button>
                 <button
                   onClick={() => dispatch({ type: "SET_SOLO_MODE", payload: true })}
-                  className={`px-3 py-1 text-[11px] font-medium rounded-md transition-all ${
+                  className={`font-pixel pixel-bold px-3 py-1 rounded-md transition-all ${
                     state.soloMode
                       ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
                       : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
@@ -266,7 +405,7 @@ export function MessageInput() {
                 </button>
               </div>
             ) : (
-              <div className="px-3 py-1 bg-gray-100 dark:bg-gray-800 rounded-lg text-[11px] font-medium text-gray-500 dark:text-gray-400 select-none">
+              <div className="font-pixel pixel-bold px-3 py-1 bg-gray-100 dark:bg-gray-800 rounded-lg text-gray-500 dark:text-gray-400 select-none">
                 {state.soloMode ? "Solo 模式" : "Pro 模式"}
               </div>
             )}
@@ -297,7 +436,7 @@ export function MessageInput() {
       {showImageWarning && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
           <div className="w-full max-w-sm bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl p-5 space-y-4">
-            <h3 className="text-sm font-semibold text-amber-600 dark:text-amber-400">
+            <h3 className="font-pixel pixel-bold text-amber-600 dark:text-amber-400">
               ⚠ 多模态消息确认
             </h3>
             <p className="text-sm text-gray-600 dark:text-gray-400">
@@ -309,7 +448,7 @@ export function MessageInput() {
                   setShowImageWarning(false);
                   setPendingImageFiles([]);
                 }}
-                className="px-3 py-1.5 text-sm text-gray-400 hover:text-gray-300"
+                className="font-pixel px-3 py-1.5 text-gray-400 hover:text-gray-300"
               >
                 取消
               </button>
@@ -322,7 +461,7 @@ export function MessageInput() {
                     setPendingImageFiles([]);
                   }
                 }}
-                className="px-4 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg"
+                className="font-pixel pixel-bold px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg"
               >
                 已确认，不再提醒
               </button>

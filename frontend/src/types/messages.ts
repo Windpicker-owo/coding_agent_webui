@@ -349,6 +349,20 @@ export interface PongMessage {
   payload: Record<string, never>;
 }
 
+// ─── Skill ───────────────────────────────────────────────
+
+export interface SkillInfo {
+  name: string;
+  description: string;
+}
+
+export interface SkillListResultMessage {
+  type: "skill.list_result";
+  payload: {
+    skills: SkillInfo[];
+  };
+}
+
 /** 所有入站消息类型的联合 */
 export type ServerMessage =
   | SessionReadyMessage
@@ -377,7 +391,8 @@ export type ServerMessage =
   | ProjectOpenedMessage
   | ModelListResultMessage
   | ModelSelectedMessage
-  | PongMessage;
+  | PongMessage
+  | SkillListResultMessage;
 
 // ─── 出站消息(客户端→服务器) ─────────────────────────────
 
@@ -484,7 +499,8 @@ export interface ClientMessage {
     | "session.close"
     | "browse.directory"
     | "model.list"
-    | "model.select";
+    | "model.select"
+    | "skill.list";
   id?: string;
   session_id?: string;
   payload: unknown;

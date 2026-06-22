@@ -108,7 +108,7 @@ function App() {
     document.body.style.backgroundColor = state.theme === 'dark' ? '#030712' : '#ffffff';
   }, [state.theme]);
 
-  // 桌面模式：缩小根字号提升信息密度
+  // 桌面模式：添加 desktop-mode class
   useEffect(() => {
     const root = document.documentElement;
     if (desktopMode) {

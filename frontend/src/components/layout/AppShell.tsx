@@ -272,22 +272,22 @@ export function AppShell({ onDisconnect }: AppShellProps) {
             {/* 模式指示器 */}
             <div className="hidden sm:flex items-center gap-1.5">
               {state.autoReview && (
-                <span className={`text-xs px-2 py-1 rounded-full font-medium ${getModeBadgeClasses("auto")}`}>
+                <span className={`font-pixel px-2 py-1 rounded-full ${getModeBadgeClasses("auto")}`}>
                   Auto
                 </span>
               )}
               {state.yoloMode && (
-                <span className={`text-xs px-2 py-1 rounded-full font-medium ${getModeBadgeClasses("yolo")}`}>
+                <span className={`font-pixel px-2 py-1 rounded-full ${getModeBadgeClasses("yolo")}`}>
                   YOLO
                 </span>
               )}
               {state.goalMode && (
-                <span className={`text-xs px-2 py-1 rounded-full font-medium ${getModeBadgeClasses("goal")}`}>
+                <span className={`font-pixel px-2 py-1 rounded-full ${getModeBadgeClasses("goal")}`}>
                   Goal
                 </span>
               )}
               {state.soloMode && (
-                <span className={`text-xs px-2 py-1 rounded-full font-medium ${getModeBadgeClasses("solo")}`}>
+                <span className={`font-pixel px-2 py-1 rounded-full ${getModeBadgeClasses("solo")}`}>
                   Solo
                 </span>
               )}
@@ -325,7 +325,7 @@ export function AppShell({ onDisconnect }: AppShellProps) {
                   title="点击查看各模型消耗详情"
                 >
                   <div className="text-xs text-gray-500 font-mono flex items-center gap-1">
-                    <span className="text-gray-400">Tokens:</span>
+                    <span className="font-pixel text-gray-400">Tokens:</span>
                     <span>{(totalTokens / 1000).toFixed(1)}k</span>
                   </div>
                   {totalCost > 0 && (
@@ -375,7 +375,7 @@ export function AppShell({ onDisconnect }: AppShellProps) {
             {isBusy && (
               <button
                 onClick={handleInterrupt}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-red-50 hover:bg-red-100 dark:bg-red-900/30 dark:hover:bg-red-900/50 text-red-600 dark:text-red-400 rounded-lg transition-colors font-medium"
+                className="font-pixel pixel-bold flex items-center gap-1.5 px-3 py-1.5 bg-red-50 hover:bg-red-100 dark:bg-red-900/30 dark:hover:bg-red-900/50 text-red-600 dark:text-red-400 rounded-lg transition-colors"
               >
                 <StopCircle size={14} />
                 <span>中断</span>
@@ -386,7 +386,7 @@ export function AppShell({ onDisconnect }: AppShellProps) {
             {!state.goalMode && (
               <button
                 onClick={() => setShowGoalInput(!showGoalInput)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg transition-colors font-medium hidden sm:flex"
+                className="font-pixel pixel-bold flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg transition-colors hidden sm:flex"
               >
                 <Target size={14} />
                 <span>Goal</span>
@@ -491,7 +491,7 @@ export function AppShell({ onDisconnect }: AppShellProps) {
               <div className="w-24 h-24 mb-6 rounded-3xl bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center shadow-inner">
                 <img src="/logo.png" alt="MoFox Logo" className="w-16 h-16 object-cover" />
               </div>
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">欢迎来到 MoFox Code</h2>
+              <h2 className="font-pixel pixel-shadow text-gray-900 dark:text-white mb-2" style={{ zoom: 2, display: 'inline-block' }}>欢迎来到 MoFox Code</h2>
               <p className="text-gray-500 dark:text-gray-400 max-w-md mb-8 text-sm">
                 您目前还没有打开任何项目。请先打开或关联一个本地项目，以便 MoFox 了解您的代码上下文。
               </p>
@@ -501,7 +501,7 @@ export function AppShell({ onDisconnect }: AppShellProps) {
                     setNewWorkDir(state.lastWorkDir || ".");
                     setShowOpenProjectDialog(true);
                   }}
-                  className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-medium transition-all shadow-sm hover:shadow text-sm"
+                  className="font-pixel pixel-bold flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all shadow-sm hover:shadow"
                 >
                   <FolderOpen size={18} />
                   打开本地项目
@@ -509,7 +509,7 @@ export function AppShell({ onDisconnect }: AppShellProps) {
               </div>
               {state.recentProjects.length > 0 && (
                 <div className="mt-12 text-left w-full max-w-md">
-                  <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 px-2">最近打开</h3>
+                  <h3 className="font-pixel pixel-bold text-gray-500 uppercase tracking-wider mb-3 px-2">最近打开</h3>
                   <div className="space-y-1">
                     {state.recentProjects.slice(0, 5).map((dir) => (
                       <button
@@ -582,9 +582,9 @@ export function AppShell({ onDisconnect }: AppShellProps) {
       {showOpenProjectDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
           <div className="w-full max-w-sm bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl p-5 space-y-4">
-            <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-200">打开项目</h2>
+            <h2 className="font-pixel pixel-bold text-gray-800 dark:text-gray-200">打开项目</h2>
             <div>
-              <label className="text-xs text-gray-500 block mb-1">项目目录</label>
+              <label className="font-pixel text-gray-500 block mb-1">项目目录</label>
               <div className="flex gap-1.5">
                 <input
                   type="text"
@@ -606,13 +606,13 @@ export function AppShell({ onDisconnect }: AppShellProps) {
             <div className="flex gap-2 justify-end">
               <button
                 onClick={() => setShowOpenProjectDialog(false)}
-                className="px-3 py-1.5 text-sm text-gray-400 hover:text-gray-300"
+                className="font-pixel px-3 py-1.5 text-gray-400 hover:text-gray-300"
               >
                 取消
               </button>
               <button
                 onClick={handleOpenProject}
-                className="px-4 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+                className="font-pixel pixel-bold px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
               >
                 打开
               </button>
@@ -637,7 +637,7 @@ export function AppShell({ onDisconnect }: AppShellProps) {
       {showNewSessionDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
           <div className="w-full max-w-sm bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl p-5 space-y-4">
-            <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-200">新建会话</h2>
+            <h2 className="font-pixel pixel-bold text-gray-800 dark:text-gray-200">新建会话</h2>
 
             {/* 模式选择器：Pro / Solo 二选一 */}
             <div className="grid grid-cols-2 gap-3">
@@ -650,7 +650,7 @@ export function AppShell({ onDisconnect }: AppShellProps) {
                     : "border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 hover:border-gray-300 dark:hover:border-gray-600"
                 }`}
               >
-                <div className={`text-sm font-semibold mb-1 ${
+                <div className={`font-pixel pixel-bold mb-1 ${
                   newSessionMode === "pro" ? "text-blue-700 dark:text-blue-300" : "text-gray-700 dark:text-gray-300"
                 }`}>Pro</div>
                 <div className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
@@ -667,7 +667,7 @@ export function AppShell({ onDisconnect }: AppShellProps) {
                     : "border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 hover:border-gray-300 dark:hover:border-gray-600"
                 }`}
               >
-                <div className={`text-sm font-semibold mb-1 ${
+                <div className={`font-pixel pixel-bold mb-1 ${
                   newSessionMode === "solo" ? "text-cyan-700 dark:text-cyan-300" : "text-gray-700 dark:text-gray-300"
                 }`}>Solo</div>
                 <div className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
@@ -679,7 +679,7 @@ export function AppShell({ onDisconnect }: AppShellProps) {
             {/* 模型选择（仅 Solo 选中时显示） */}
             {newSessionMode === "solo" && (
               <div>
-                <label className="text-xs text-gray-500 block mb-1">模型</label>
+                <label className="font-pixel text-gray-500 block mb-1">模型</label>
                 <select
                   value={newSessionSoloModel}
                   onChange={(e) => setNewSessionSoloModel(e.target.value)}
@@ -696,13 +696,13 @@ export function AppShell({ onDisconnect }: AppShellProps) {
             <div className="flex gap-2 justify-end">
               <button
                 onClick={() => setShowNewSessionDialog(false)}
-                className="px-3 py-1.5 text-sm text-gray-400 hover:text-gray-300"
+                className="font-pixel px-3 py-1.5 text-gray-400 hover:text-gray-300"
               >
                 取消
               </button>
               <button
                 onClick={handleConfirmNewSession}
-                className="px-4 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+                className="font-pixel pixel-bold px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
               >
                 创建
               </button>
